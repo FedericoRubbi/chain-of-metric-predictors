@@ -1,0 +1,166 @@
+from typing import Dict, List, Tuple
+import os
+import torch
+import torch.nn as nn
+from torch.cuda.amp import autocast, GradScaler
+from torch.utils.data import DataLoader
+from utils.scores import scores_from_embeddings, softmax_with_temperature
+from utils.metrics import cross_entropy_from_probs, top1_accuracy
+from utils.anchors import build_or_load_anchors
+from utils.schedulers import WarmupCosine
+from utils.logger import JsonlLogger
+from models.greedy_linear import GreedyLinearNet, GreedyConfig
+
+
+class GreedyTrainer:
+    def __init__(self, run_dir: str, model: GreedyLinearNet, cfg: Dict, num_classes: int, dataset: str):
+        self.run_dir = run_dir
+        self.model = model
+        self.cfg = cfg
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.to(self.device)
+        self.num_classes = num_classes
+        self.dataset = dataset
+
+        # Anchors (deterministic)
+        anchors_path = os.path.join('artifacts', f"anchors_{dataset}_C{num_classes}_N{cfg['N']}_seed{cfg['seed']}.pt")
+        self.anchors = build_or_load_anchors(anchors_path, num_classes, cfg['N'], seed=cfg['seed']).to(self.device)
+
+        # Per-layer optimizers & schedulers
+        self.optims: List[torch.optim.Optimizer] = []
+        self.scheds: List[WarmupCosine] = []
+        for lin in model.linears:
+            opt = torch.optim.Adam(lin.parameters(), lr=cfg['lr'], betas=(0.9, 0.999), weight_decay=cfg['weight_decay'])
+            self.optims.append(opt)
+        total_steps = None  # set during fit with len(train_loader) * epochs
+        self.scaler = GradScaler(enabled=True)
+        self.logger = JsonlLogger(run_dir)
+
+    def _make_targets(self, y: torch.Tensor) -> torch.Tensor:
+        # one-hot targets p
+        p = torch.zeros((y.size(0), self.num_classes), device=y.device, dtype=torch.float32)
+        p.scatter_(1, y.view(-1, 1), 1.0)
+        return p
+
+    def _compute_layer_logits_and_probs(self, h: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        scores = scores_from_embeddings(h, self.anchors.E, similarity=self.cfg['similarity'])  # (B, C)
+        q = softmax_with_temperature(scores, self.cfg['tau'])
+        return scores, q
+
+    def _step_batch(self, batch, global_step: int):
+        x, y = batch
+        x = x.to(self.device)
+        y = y.to(self.device)
+        B = x.size(0)
+        x = x.view(B, -1)
+
+        p = self._make_targets(y)
+
+        # We'll compute layer by layer, ensuring gradient isolation per layer
+        # h0 is the input vector
+        h_prev = x
+        per_layer_acc = []
+        per_layer_loss = []
+
+        for i in range(1, self.cfg['layers'] + 1):
+            # Detach input to keep independence from previous layer params
+            h_in = h_prev.detach()
+
+            # Forward current layer (with grad)
+            with autocast(enabled=True):
+                h_i = self.model.forward_layer_from(h_in, i)
+                logits_i, q_i = self._compute_layer_logits_and_probs(h_i)
+
+                # For ACE we need q_{i+1}. If last layer, ACE term = 0.
+                if i < self.cfg['layers']:
+                    # Compute next layer output *without allowing gradients to flow back*
+                    with torch.no_grad():
+                        h_ip1 = self.model.forward_layer_from(h_i.detach(), i + 1)
+                        _, q_ip1 = self._compute_layer_logits_and_probs(h_ip1)
+                    ace = cross_entropy_from_probs(q_i, q_ip1)  # H(q_i, q_{i+1})
+                else:
+                    ace = torch.tensor(0.0, device=self.device)
+
+                ce = cross_entropy_from_probs(p, q_i)  # H(p, q_i)
+                loss_i = ce - self.cfg['lambda_ace'] * ace
+
+            # Optimize only layer i's Linear parameters
+            self.optims[i - 1].zero_grad(set_to_none=True)
+            self.scaler.scale(loss_i).backward()
+            self.scaler.step(self.optims[i - 1])
+            # No scheduler step here; we'll step per-iteration if created in fit()
+
+            per_layer_loss.append(loss_i.detach().item())
+            per_layer_acc.append(top1_accuracy(logits_i.detach(), y))
+
+            # Prepare for next loop iteration's input
+            h_prev = h_i.detach()
+
+        self.scaler.update()
+
+        # Return last layer metrics + per-layer arrays
+        return {
+            'loss': sum(per_layer_loss) / len(per_layer_loss),
+            'acc_last': per_layer_acc[-1],
+            'acc_layers': per_layer_acc,
+            'loss_layers': per_layer_loss,
+        }
+
+    def fit(self, train_loader: DataLoader, val_loader: DataLoader, epochs: int):
+        total_steps = len(train_loader) * epochs
+        warmup = int(self.cfg['warmup_ratio'] * total_steps)
+        # Create schedulers now that we know total_steps
+        self.scheds = [WarmupCosine(opt, warmup_steps=warmup, total_steps=total_steps) for opt in self.optims]
+
+        best_val = 0.0
+        best_path = os.path.join(self.run_dir, 'best.pt')
+
+        global_step = 0
+        for epoch in range(1, epochs + 1):
+            self.model.train()
+            for it, batch in enumerate(train_loader, start=1):
+                metrics = self._step_batch(batch, global_step)
+                # Step schedulers
+                for sch in self.scheds:
+                    sch.step()
+                global_step += 1
+                # Log (compact)
+                self.logger.log({
+                    'phase': 'train', 'epoch': epoch, 'iter': it, 'step': global_step,
+                    'loss': metrics['loss'], 'acc_last': metrics['acc_last']
+                })
+
+            # Validation
+            val_acc_last, val_acc_layers = self.evaluate(val_loader)
+            self.logger.log({'phase': 'val', 'epoch': epoch, 'iter': 0, 'loss': None, 'acc_last': val_acc_last, 'acc_layers': val_acc_layers})
+
+            # Checkpoint best
+            if val_acc_last > best_val:
+                best_val = val_acc_last
+                torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, best_path)
+
+        # Save final
+        torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, os.path.join(self.run_dir, 'last.pt'))
+
+    @torch.no_grad()
+    def evaluate(self, loader: DataLoader) -> Tuple[float, List[float]]:
+        self.model.eval()
+        device = self.device
+        total = 0
+        correct_layers = [0 for _ in range(self.cfg['layers'])]
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+            B = x.size(0)
+            x = x.view(B, -1)
+
+            h_prev = x
+            for i in range(1, self.cfg['layers'] + 1):
+                h_i = self.model.forward_layer_from(h_prev, i)
+                logits_i, _ = self._compute_layer_logits_and_probs(h_i)
+                preds = logits_i.argmax(dim=-1)
+                correct_layers[i - 1] += (preds == y).sum().item()
+                h_prev = h_i
+            total += B
+        acc_layers = [c / total for c in correct_layers]
+        return acc_layers[-1], acc_layers
