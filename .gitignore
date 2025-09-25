@@ -297,6 +297,46 @@ coverage.xml
 docs/_build/
 site/
 
+# LaTeX files
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.idx
+*.ind
+*.ilg
+*.acn
+*.acr
+*.alg
+*.glg
+*.glo
+*.gls
+*.ist
+*.lol
+*.nav
+*.snm
+*.vrb
+*.xdv
+*.dvi
+*.ps
+*.eps
+*.figlist
+*.makefile
+*.fls
+*.fdb_latexmk
+*.auxlock
+*.synctex(busy)
+*.synctex.gz(busy)
+
 # Package files
 *.egg-info/
 dist/

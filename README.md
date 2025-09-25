@@ -17,8 +17,8 @@ The architecture consists of:
 project/
 ├─ data/                       # Auto-downloaded datasets
 ├─ configs/                    # YAML configs per dataset/model
-├─ models/                     # Model implementations (to be added)
-├─ trainers/                   # Training logic (to be added)
+├─ models/                     # Model implementations
+├─ trainers/                   # Training logic
 ├─ utils/                      # Utilities (seed, run manager, anchors, etc.)
 ├─ scripts/
 │   └─ train.py               # CLI training script
@@ -102,41 +102,6 @@ Each configuration file specifies:
 - Architecture parameters (N, layers, similarity type)
 - Training parameters (epochs, batch size, learning rate)
 - Regularization (tau, lambda_ace)
-
-## Current Status
-
-✅ **Step 1 Complete**: Project structure, data loaders, configuration files, and basic training script
-✅ **Step 2 Complete**: Model architectures and training logic
-✅ **Step 3 Complete**: Evaluation and visualization tools
-
-The following components are implemented:
-
-### Step 1 - Foundation
-- Dataset loaders for MNIST, CIFAR-10, and CIFAR-100
-- Configuration management with YAML files
-- Run management with timestamped directories
-- Utility functions for seeding, anchors, scoring, and metrics
-
-### Step 2 - Models & Training
-- Greedy linear architecture with per-layer optimizers
-- ACE regularization between consecutive layers (q_i vs q_{i+1})
-- MLP baseline for comparison
-- Mixed precision training with cosine learning rate scheduling
-- Comprehensive logging and checkpointing
-
-### Step 3 - Evaluation & Visualization
-- Evaluation script with confusion matrix support
-- Training curve plotting utilities
-- Confusion matrix visualization
-- Per-layer accuracy analysis for greedy models
-
-## Key Features
-
-- **Reproducible**: Fixed random seeds and deterministic behavior
-- **Modular**: Clean separation of concerns with configurable components
-- **Extensible**: Easy to add new datasets or modify architectures
-- **Logged**: Comprehensive parameter tracking and run management
-- **Cross-platform**: Works on different operating systems and Python versions
 
 ## Output Files
 
