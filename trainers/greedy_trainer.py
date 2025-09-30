@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import os
 import torch
 import torch.nn as nn
@@ -9,6 +9,7 @@ from utils.metrics import cross_entropy_from_probs, top1_accuracy
 from utils.anchors import build_or_load_anchors
 from utils.schedulers import WarmupCosine
 from utils.logger import JsonlLogger
+from utils.metrics_collector import MetricsCollector
 from models.greedy_linear import GreedyLinearNet, GreedyConfig
 
 
@@ -35,6 +36,17 @@ class GreedyTrainer:
         total_steps = None  # set during fit with len(train_loader) * epochs
         self.scaler = GradScaler(enabled=True)
         self.logger = JsonlLogger(run_dir)
+        
+        # Initialize metrics collector
+        self.metrics_collector = MetricsCollector(
+            num_classes=num_classes,
+            N=cfg['N'],
+            similarity=cfg.get('similarity', 'cosine'),
+            tau=cfg.get('tau', 1.0),
+            lambda_reg=cfg.get('lambda_reg', 1e-3)
+        )
+        self.metrics_collector.set_anchors(self.anchors.E)
+        self.metrics_collector.initialize_entropy_estimators(cfg['layers'])
 
     def _make_targets(self, y: torch.Tensor) -> torch.Tensor:
         # one-hot targets p
@@ -61,6 +73,7 @@ class GreedyTrainer:
         h_prev = x
         per_layer_acc = []
         per_layer_loss = []
+        embeddings_list = []  # Store embeddings for metrics
 
         for i in range(1, self.cfg['layers'] + 1):
             # Detach input to keep independence from previous layer params
@@ -70,6 +83,9 @@ class GreedyTrainer:
             with autocast(enabled=True):
                 h_i = self.model.forward_layer_from(h_in, i)
                 logits_i, q_i = self._compute_layer_logits_and_probs(h_i)
+                
+                # Store embeddings for metrics
+                embeddings_list.append(h_i.detach())
 
                 # For ACE we need q_{i+1}. If last layer, ACE term = 0.
                 if i < self.cfg['layers']:
@@ -98,12 +114,21 @@ class GreedyTrainer:
 
         self.scaler.update()
 
-        # Return last layer metrics + per-layer arrays
+        # Collect metrics every few iterations to avoid overhead
+        batch_metrics = None
+        if global_step % self.cfg.get('metrics_log_frequency', 10) == 0:  # Use configurable frequency
+            with torch.no_grad():
+                batch_metrics = self.metrics_collector.collect_gmlp_metrics(
+                    embeddings_list, y, x
+                )
+
+        # Return last layer metrics + per-layer arrays + batch metrics
         return {
             'loss': sum(per_layer_loss) / len(per_layer_loss),
             'acc_last': per_layer_acc[-1],
             'acc_layers': per_layer_acc,
             'loss_layers': per_layer_loss,
+            'batch_metrics': batch_metrics,
         }
 
     def fit(self, train_loader: DataLoader, val_loader: DataLoader, epochs: int):
@@ -125,14 +150,22 @@ class GreedyTrainer:
                     sch.step()
                 global_step += 1
                 # Log (compact)
-                self.logger.log({
+                log_entry = {
                     'phase': 'train', 'epoch': epoch, 'iter': it, 'step': global_step,
                     'loss': metrics['loss'], 'acc_last': metrics['acc_last']
-                })
+                }
+                if metrics['batch_metrics'] is not None:
+                    log_entry['metrics'] = metrics['batch_metrics']
+                self.logger.log(log_entry)
 
             # Validation
-            val_acc_last, val_acc_layers = self.evaluate(val_loader)
-            self.logger.log({'phase': 'val', 'epoch': epoch, 'iter': 0, 'loss': None, 'acc_last': val_acc_last, 'acc_layers': val_acc_layers})
+            val_acc_last, val_acc_layers, val_metrics = self.evaluate(val_loader)
+            
+            # Log validation metrics
+            log_entry = {'phase': 'val', 'epoch': epoch, 'iter': 0, 'loss': None, 'acc_last': val_acc_last, 'acc_layers': val_acc_layers}
+            if val_metrics:
+                log_entry['metrics'] = val_metrics
+            self.logger.log(log_entry)
 
             # Checkpoint best
             if val_acc_last > best_val:
@@ -143,11 +176,13 @@ class GreedyTrainer:
         torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, os.path.join(self.run_dir, 'last.pt'))
 
     @torch.no_grad()
-    def evaluate(self, loader: DataLoader) -> Tuple[float, List[float]]:
+    def evaluate(self, loader: DataLoader) -> Tuple[float, List[float], Optional[Dict]]:
         self.model.eval()
         device = self.device
         total = 0
         correct_layers = [0 for _ in range(self.cfg['layers'])]
+        all_metrics = []
+        
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
@@ -155,12 +190,34 @@ class GreedyTrainer:
             x = x.view(B, -1)
 
             h_prev = x
+            embeddings_list = []
+            
             for i in range(1, self.cfg['layers'] + 1):
                 h_i = self.model.forward_layer_from(h_prev, i)
                 logits_i, _ = self._compute_layer_logits_and_probs(h_i)
                 preds = logits_i.argmax(dim=-1)
                 correct_layers[i - 1] += (preds == y).sum().item()
                 h_prev = h_i
+                embeddings_list.append(h_i)
+            
             total += B
+            
+            # Collect metrics for this batch
+            batch_metrics = self.metrics_collector.collect_gmlp_metrics(
+                embeddings_list, y, x
+            )
+            all_metrics.append(batch_metrics)
+        
         acc_layers = [c / total for c in correct_layers]
-        return acc_layers[-1], acc_layers
+        
+        # Average metrics across all batches
+        avg_metrics = None
+        if all_metrics:
+            avg_metrics = {}
+            for layer_key in all_metrics[0].keys():
+                avg_metrics[layer_key] = {}
+                for metric_name in all_metrics[0][layer_key].keys():
+                    values = [batch[layer_key][metric_name] for batch in all_metrics]
+                    avg_metrics[layer_key][metric_name] = sum(values) / len(values)
+        
+        return acc_layers[-1], acc_layers, avg_metrics

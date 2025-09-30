@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 import torch
 import torch.nn as nn
 
@@ -30,6 +31,20 @@ class MlpBaseline(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
+    def forward_all(self, x: torch.Tensor) -> List[torch.Tensor]:
+        """Forward pass returning all intermediate embeddings."""
+        embeddings = []
+        h = x
+        
+        # Process through backbone layers
+        for i, module in enumerate(self.backbone):
+            h = module(h)
+            # Collect embeddings after ReLU activations
+            if isinstance(module, torch.nn.ReLU):
+                embeddings.append(h)
+        
+        return embeddings
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.backbone(x)
         return self.head(h)

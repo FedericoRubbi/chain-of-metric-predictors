@@ -1,174 +1,180 @@
 # Chain of Metric Predictors
 
-This project implements a chosen architecture for classification tasks using a sequence of fully-connected linear layers with greedy training and metric learning objectives.
+This project implements neural network architectures for classification tasks using fully-connected linear layers with greedy training and comprehensive metric learning objectives.
 
 ## Architecture Overview
 
-The architecture consists of:
-- A sequence of fully-connected linear layers (with bias and ReLU activations)
-- Each layer maps vectors of size N to vectors of size N (except the first layer which maps input to N)
-- Each layer is trained greedily with its own optimizer
-- Uses metric learning with class anchors and temperature-scaled softmax
-- Includes ACE (Amended Cross Entropy) regularization between consecutive layers
+The project supports two main architectures:
 
+- **MLP Baseline**: Standard multi-layer perceptron trained with backpropagation
+- **Greedy MLP (GMLP)**: MLP trained with greedy backpropagation and metric learning objectives
 
-## Testing
-### What architectures to test?
-- baseline MLP trained with BP (MLP)
-- baseline MLP trained with forward-forward algorithm (FF)
-- baseline MLP trained with collaborative forward-forward (CFF)
-- MLP trained with greedy BP (GMLP)
+### Key Features
+- Sequence of fully-connected linear layers (with bias and ReLU activations)
+- Each layer maps vectors of size N to vectors of size N (except first layer: input → N)
+- Greedy training with individual optimizers per layer
+- Metric learning with class anchors and temperature-scaled softmax
+- ACE (Amended Cross Entropy) regularization between consecutive layers
 
+## Research Questions
 
-### What to test?
-metrics provide insight for the following questions:
-- are later layers getting more predictive?
-- are layers compressing?
-- are layers genuinely different from previous layers?
+The system collects comprehensive metrics to answer:
 
-### What data to collect for each epoch?
+1. **Are later layers getting more predictive?**
+2. **Are layers compressing?**
+3. **Are layers genuinely different from previous layers?**
 
-MLP:
-- cosine-to-label anchors (per layer) for alignment: \;\overline{\cos(z_\ell, a_{y})} and margin: \;\overline{\cos(z_\ell, a_{y}) - \max_{k\neq y}\cos(z_\ell, a_{k})}
-- layerwise accuracy on test set
-- layerwise cross-entropy with GT
-- layerwise ACE regularizer, namely cross-entropy between consecutive softmax heads (averaged over a batch)
-- functional entropy of each layer
-- MI between input and each layer's output
-- gaussian-entropy proxy of EMA of activations as \widehat{H}(Z_\ell)\propto \sum_i \tfrac12 \log \hat\sigma_i^2
-- F1 score, accuracy One-shot linear probe (ridge, closed form), fit W = (X^\top X + \lambda I)^{-1}X^\top Y on one held-out minibatch
-- participance ration from the activation covariance C on a minibatch (or diagonal approx): \mathrm{PR}=\frac{(\sum_i \lambda_i)^2}{\sum_i \lambda_i^2}
-- linear CKA (minibatch): \text{CKA}(Z_\ell,Z_{\ell+1}) = \frac{\|Z_\ell^\top Z_{\ell+1}\|F^2}{\|Z\ell^\top Z_\ell\|F \cdot \|Z{\ell+1}^\top Z_{\ell+1}\|_F}
-- R^2 of ridge regression Z_{\ell+1}\approx Z_\ell W on a minibatch
+## Quick Start
 
-GMLP:
-- cosine-to-label anchors (per layer) for alignment: \;\overline{\cos(z_\ell, a_{y})} and margin: \;\overline{\cos(z_\ell, a_{y}) - \max_{k\neq y}\cos(z_\ell, a_{k})}
-- layerwise accuracy on test set
-- layerwise cross-entropy with GT
-- layerwise ACE regularizer, namely cross-entropy between consecutive softmax heads (averaged over a batch)
-- functional entropy of each layer
-- MI between input and each layer's output
-- gaussian-entropy proxy of EMA of activations as \widehat{H}(Z_\ell)\propto \sum_i \tfrac12 \log \hat\sigma_i^2
-- F1 score, accuracy One-shot linear probe (ridge, closed form), fit W = (X^\top X + \lambda I)^{-1}X^\top Y on one held-out minibatch
-- participance ration from the activation covariance C on a minibatch (or diagonal approx): \mathrm{PR}=\frac{(\sum_i \lambda_i)^2}{\sum_i \lambda_i^2}
-- linear CKA (minibatch): \text{CKA}(Z_\ell,Z_{\ell+1}) = \frac{\|Z_\ell^\top Z_{\ell+1}\|F^2}{\|Z\ell^\top Z_\ell\|F \cdot \|Z{\ell+1}^\top Z_{\ell+1}\|_F}
-- R^2 of ridge regression Z_{\ell+1}\approx Z_\ell W on a minibatch
+### Setup
+```bash
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-FF:
-[TO BE DEFINED]
+# Install dependencies
+pip install -r requirements.txt
+```
 
-CFF:
-[TO BE DEFINED]
+### 🚀 Run Complete Simulation (Recommended)
+
+Run training, evaluation, and visualization with a single command:
+
+```bash
+# Complete simulation
+python scripts/run_simulation.py --config configs/greedy_mnist.yaml
+
+# With interactive plots
+python scripts/run_simulation.py --config configs/greedy_mnist.yaml --show
+
+# Research questions analysis only
+python scripts/run_simulation.py --config configs/greedy_mnist.yaml --research_only
+
+# Compare multiple runs
+python scripts/run_simulation.py --config configs/greedy_mnist.yaml --compare_runs runs/mnist/mlp/run1 runs/mnist/greedy/run2
+```
+
+**Features:**
+- Automated workflow: training → evaluation → visualization
+- Rich progress display with status updates
+- Comprehensive reporting of generated files
+- Error handling with informative messages
+- Multi-run comparison capabilities
+
+## Individual Scripts
+
+### Script Overview
+
+| Script | Purpose | Key Features |
+|--------|---------|--------------|
+| `run_simulation.py` | **Complete workflow automation** | Training → Evaluation → Visualization in one command |
+| `train.py` | **Model training** | Trains MLP or GMLP models with comprehensive metrics collection |
+| `eval.py` | **Model evaluation** | Evaluates trained models and generates test results |
+| `plot_curves.py` | **Basic visualization** | Generates training curves and research questions analysis |
+| `plot_metrics.py` | **Advanced analysis** | Multi-run comparison and statistical analysis |
+| `show_confusion.py` | **Confusion matrix** | Visualizes classification confusion matrices |
+
+### Training
+```bash
+python scripts/train.py --config configs/greedy_mnist.yaml
+python scripts/train.py --config configs/mlp_mnist.yaml
+```
+**What it does:** Trains models with specified configuration, collects comprehensive metrics during training, saves checkpoints and logs.
+
+### Evaluation
+```bash
+python scripts/eval.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08 --confusion
+```
+**What it does:** Loads trained model, evaluates on test set, generates accuracy results and confusion matrix.
+
+### Visualization
+```bash
+# Basic plots
+python scripts/plot_curves.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08
+
+# Advanced analysis
+python scripts/plot_metrics.py --run_dirs runs/mnist/greedy/run1 runs/mnist/greedy/run2 --comprehensive
+
+# Confusion matrix
+python scripts/show_confusion.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08
+```
+**What they do:**
+- `plot_curves.py`: Generates training curves, layerwise metrics, and research questions analysis
+- `plot_metrics.py`: Compares multiple runs, creates correlation matrices, and statistical analysis
+- `show_confusion.py`: Creates confusion matrix visualizations with optional normalization
+
+## Configuration
+
+Configuration files specify:
+- **Dataset**: mnist, cifar10, cifar100
+- **Model**: greedy, mlp
+- **Architecture**: N (hidden size), layers, similarity type
+- **Training**: epochs, batch size, learning rate, scheduler
+- **Regularization**: tau (temperature), lambda_ace
+- **Metrics**: metrics_log_frequency (default: 5)
+
+## Metrics Collection
+
+The system collects 10 comprehensive metrics during training:
+
+- **Cosine-to-label anchors** (alignment & margin)
+- **Layerwise accuracy and cross-entropy**
+- **ACE regularizer** (between consecutive layers)
+- **Mutual information** (input to layer outputs)
+- **Gaussian entropy proxy** (EMA-based estimation)
+- **One-shot linear probe** (ridge regression classification)
+- **Participation ratio** (effective dimensionality)
+- **Linear CKA** (layer similarity)
+- **Ridge regression R²** (layer-to-layer predictability)
+
+**Metrics Logging Frequency:**
+- `5` (default): Every 5 iterations
+- `1`: Every iteration (detailed but slower)
+- `20`: Every 20 iterations (faster but less detailed)
+
+## Output Files
+
+Each run creates a timestamped directory with:
+
+### Training
+- `params.yaml` - Complete configuration
+- `log.jsonl` - Training logs with metrics
+- `best.pt` - Best model checkpoint
+- `last.pt` - Final model checkpoint
+
+### Evaluation
+- `test_results.json` - Test accuracy results
+- `confusion.npy` - Confusion matrix
+- `class_report.json` - Classification report
+
+### Visualization
+- `basic_curves.png` - Training curves
+- `research_questions.png` - Research questions analysis
+- `layerwise_{metric}_{phase}.png` - Layerwise metrics
+- `metrics_heatmap_{phase}.png` - Metrics overview
+- `confusion.png` - Confusion matrix plot
+
+### Advanced Analysis
+- `multi_run_{metric}_{layer}_{phase}.png` - Multi-run comparison
+- `architecture_comparison_{metric}.png` - MLP vs GMLP
+- `correlation_matrix_{phase}.png` - Metrics correlation
+- `layer_progression_analysis.png` - Statistical analysis
 
 ## Project Structure
 
 ```
 project/
-├─ data/                       # Auto-downloaded datasets
-├─ configs/                    # YAML configs per dataset/model
+├─ configs/                    # YAML configurations
 ├─ models/                     # Model implementations
 ├─ trainers/                   # Training logic
-├─ utils/                      # Utilities (seed, run manager, anchors, etc.)
-├─ scripts/
-│   └─ train.py               # CLI training script
-└─ requirements.txt
+├─ utils/                      # Utilities (metrics, anchors, etc.)
+├─ scripts/                    # CLI scripts
+│   ├─ run_simulation.py     # Comprehensive simulation
+│   ├─ train.py              # Training
+│   ├─ eval.py               # Evaluation
+│   ├─ plot_curves.py        # Basic visualization
+│   ├─ plot_metrics.py       # Advanced visualization
+│   └─ show_confusion.py     # Confusion matrix
+├─ data/                      # Auto-downloaded datasets
+└─ runs/                      # Training outputs
 ```
-
-## Setup
-
-1. Create and activate a virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Training
-
-Run training with a specific configuration:
-
-```bash
-# MNIST with greedy architecture
-python scripts/train.py --config configs/greedy_mnist.yaml
-
-# CIFAR-10 with greedy architecture
-python scripts/train.py --config configs/greedy_cifar10.yaml
-
-# CIFAR-100 with greedy architecture
-python scripts/train.py --config configs/greedy_cifar100.yaml
-
-# MNIST with MLP baseline
-python scripts/train.py --config configs/mlp_mnist.yaml
-```
-
-### Evaluation
-
-Evaluate a trained model:
-
-```bash
-# Basic evaluation
-python scripts/eval.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08
-
-# Evaluation with confusion matrix
-python scripts/eval.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08 --confusion
-
-# Evaluate using last checkpoint instead of best
-python scripts/eval.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08 --ckpt last.pt
-```
-
-### Visualization
-
-Generate training curves and confusion matrices:
-
-```bash
-# Plot training curves
-python scripts/plot_curves.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08
-
-# Show plots interactively
-python scripts/plot_curves.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08 --show
-
-# Visualize confusion matrix
-python scripts/show_confusion.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08
-
-# Normalized confusion matrix
-python scripts/show_confusion.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08 --normalize
-
-# With custom class labels
-python scripts/show_confusion.py --run_dir runs/mnist/greedy/0001_2025-09-22_19-31-08 --labels "0,1,2,3,4,5,6,7,8,9"
-```
-
-### Configuration
-
-Each configuration file specifies:
-- Dataset (mnist, cifar10, cifar100)
-- Model type (greedy, mlp)
-- Architecture parameters (N, layers, similarity type)
-- Training parameters (epochs, batch size, learning rate)
-- Regularization (tau, lambda_ace)
-
-## Output Files
-
-Each training run creates a timestamped directory with:
-
-### Training Outputs
-- `params.yaml`: Complete configuration used for the run
-- `log.jsonl`: Training logs with loss and accuracy metrics
-- `best.pt`: Best model checkpoint (by validation accuracy)
-- `last.pt`: Final model checkpoint
-
-### Evaluation Outputs (after running eval.py)
-- `test_results.json`: Test accuracy results
-- `confusion.npy`: Confusion matrix (numpy array)
-- `class_report.json`: Detailed classification report
-
-### Visualization Outputs (after running plot_curves.py)
-- `plot_train_loss.png`: Training loss curve
-- `plot_train_acc_last.png`: Training accuracy curve
-- `plot_val_acc_last.png`: Validation accuracy curve
-- `confusion.png`: Confusion matrix visualization (after running show_confusion.py)
