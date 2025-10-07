@@ -1,7 +1,7 @@
 import argparse
 import yaml
-import sys
 import os
+import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rich.console import Console
@@ -59,7 +59,7 @@ def main():
         model = GreedyLinearNet(gcfg)
         trainer = GreedyTrainer(run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
         trainer.fit(bundle.train, bundle.val, epochs=cfg['epochs'])
-        test_acc_last, test_acc_layers = trainer.evaluate(bundle.test)
+        test_acc_last, test_acc_layers, test_metrics = trainer.evaluate(bundle.test)
         console.print(f"[bold cyan]Test Acc (last layer):[/bold cyan] {test_acc_last:.4f}")
         console.print(f"Per-layer test acc: {test_acc_layers}")
 
@@ -71,9 +71,9 @@ def main():
             num_classes=bundle.num_classes,
         )
         model = MlpBaseline(mcfg)
-        trainer = BaselineTrainer(run_dir, model, cfg)
+        trainer = BaselineTrainer(run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
         trainer.fit(bundle.train, bundle.val, epochs=cfg['epochs'])
-        test_acc = trainer.evaluate(bundle.test)
+        test_acc, test_metrics = trainer.evaluate(bundle.test)
         console.print(f"[bold cyan]Test Acc:[/bold cyan] {test_acc:.4f}")
     else:
         raise ValueError(f"Unknown model: {cfg['model']}")

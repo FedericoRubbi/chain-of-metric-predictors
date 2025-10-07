@@ -1,5 +1,6 @@
 from typing import Dict, Tuple, Optional
 import os
+import sys
 import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast, GradScaler
@@ -7,7 +8,11 @@ from torch.utils.data import DataLoader
 from utils.schedulers import WarmupCosine
 from utils.logger import JsonlLogger
 from utils.metrics_collector import MetricsCollector
+from utils.optimized_metrics_collector import OptimizedMetricsCollector
 from utils.anchors import build_or_load_anchors
+from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.console import Console
+from datetime import datetime
 
 
 class BaselineTrainer:
@@ -27,12 +32,14 @@ class BaselineTrainer:
         self.best_path = os.path.join(run_dir, 'best.pt')
         
         # Initialize metrics collector
-        self.metrics_collector = MetricsCollector(
+        enable_slow_metrics = self.cfg.get('enable_slow_metrics', False)
+        self.metrics_collector = OptimizedMetricsCollector(
             num_classes=num_classes,
             N=cfg['N'],
             similarity=cfg.get('similarity', 'cosine'),
             tau=cfg.get('tau', 1.0),
-            lambda_reg=cfg.get('lambda_reg', 1e-3)
+            lambda_reg=cfg.get('lambda_reg', 1e-3),
+            enable_slow_metrics=enable_slow_metrics
         )
         
         # Load anchors for metrics
@@ -42,6 +49,7 @@ class BaselineTrainer:
         
         # Initialize entropy estimators
         self.metrics_collector.initialize_entropy_estimators(cfg['layers'])
+        self.console = Console()
 
     def fit(self, train_loader: DataLoader, val_loader: DataLoader, epochs: int):
         total_steps = len(train_loader) * epochs
@@ -49,58 +57,129 @@ class BaselineTrainer:
         sched = WarmupCosine(self.optim, warmup_steps=warmup, total_steps=total_steps)
 
         best_val = 0.0
+        global_step = 0
 
-        for epoch in range(1, epochs + 1):
-            self.model.train()
-            epoch_metrics = []
+        with Progress(
+            TextColumn("[bold blue]Training"),
+            BarColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+        ) as progress:
+            # Create main training task
+            training_task = progress.add_task(
+                f"Training for {epochs} epochs", 
+                total=epochs
+            )
             
-            for it, (x, y) in enumerate(train_loader, start=1):
-                x = x.to(self.device)
-                y = y.to(self.device)
-                B = x.size(0)
-                x = x.view(B, -1)
+            for epoch in range(1, epochs + 1):
+                self.model.train()
+                epoch_metrics = []
                 
-                self.optim.zero_grad(set_to_none=True)
-                with autocast(enabled=True):
-                    # Get all intermediate embeddings
-                    embeddings_list = self.model.forward_all(x)
-                    logits = self.model(x)
-                    loss = self.crit(logits, y)
+                # Create epoch task
+                epoch_task = progress.add_task(
+                    f"Epoch {epoch}/{epochs}", 
+                    total=len(train_loader)
+                )
                 
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optim)
-                self.scaler.update()
-                sched.step()
-                
-                # Collect metrics every few iterations to avoid overhead
-                if it % self.cfg.get('metrics_log_frequency', 10) == 0:  # Use configurable frequency
+                for it, (x, y) in enumerate(train_loader, start=1):
+                    x = x.to(self.device)
+                    y = y.to(self.device)
+                    B = x.size(0)
+                    x = x.view(B, -1)
+                    
+                    self.optim.zero_grad(set_to_none=True)
+                    with autocast(enabled=True):
+                        # Get all intermediate embeddings
+                        embeddings_list = self.model.forward_all(x)
+                        logits = self.model(x)
+                        loss = self.crit(logits, y)
+                    
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(self.optim)
+                    self.scaler.update()
+                    sched.step()
+                    
+                    # Compute training accuracy
                     with torch.no_grad():
-                        # Compute logits for each layer using anchors
-                        logits_list = []
-                        for embeddings in embeddings_list:
-                            layer_logits, _ = self.metrics_collector.compute_layer_logits_and_probs(embeddings)
-                            logits_list.append(layer_logits)
-                        
-                        # Collect metrics
-                        batch_metrics = self.metrics_collector.collect_mlp_metrics(
-                            embeddings_list, logits_list, y, x
-                        )
-                        epoch_metrics.append(batch_metrics)
+                        preds = logits.argmax(dim=-1)
+                        acc = (preds == y).float().mean().item()
+                    
+                    # Collect metrics based on frequency setting
+                    metrics_frequency = self.cfg.get('metrics_frequency', 'iteration')
+                    should_collect_metrics = False
+                    
+                    if metrics_frequency == 'iteration':
+                        # Collect metrics every few iterations to avoid overhead
+                        should_collect_metrics = (it % self.cfg.get('metrics_log_frequency', 10) == 0)
+                    elif metrics_frequency == 'epoch':
+                        # Collect metrics only on the last iteration of the epoch
+                        should_collect_metrics = (it == len(train_loader))
+                    
+                    if should_collect_metrics:
+                        with torch.no_grad():
+                            # Compute logits for each layer using anchors
+                            logits_list = []
+                            for embeddings in embeddings_list:
+                                layer_logits, _ = self.metrics_collector.compute_layer_logits_and_probs(embeddings)
+                                logits_list.append(layer_logits)
+                            
+                            # Collect metrics
+                            batch_metrics = self.metrics_collector.collect_mlp_metrics(
+                                embeddings_list, logits_list, y, x
+                            )
+                            epoch_metrics.append(batch_metrics)
+                    
+                    # Log training step
+                    log_entry = {
+                        'phase': 'train', 
+                        'epoch': epoch, 
+                        'iter': it,
+                        'step': global_step,
+                        'loss': float(loss.detach().item()),
+                        'acc': acc,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    if should_collect_metrics and epoch_metrics:
+                        # Include metrics in the log entry if we just collected them
+                        log_entry['metrics'] = epoch_metrics[-1]
+                    self.logger.log(log_entry)
+                    
+                    global_step += 1
+                    
+                    # Update progress
+                    progress.update(epoch_task, advance=1, description=f"Epoch {epoch}/{epochs} - Loss: {loss.item():.4f}")
                 
-                self.logger.log({'phase': 'train', 'epoch': epoch, 'iter': it, 'loss': float(loss.detach().item())})
-
-            # Validation with metrics
-            val_acc, val_metrics = self.evaluate(val_loader)
-            
-            # Log validation metrics
-            log_entry = {'phase': 'val', 'epoch': epoch, 'iter': 0, 'acc': val_acc}
-            if val_metrics:
-                log_entry['metrics'] = val_metrics
-            self.logger.log(log_entry)
-            
-            if val_acc > best_val:
-                best_val = val_acc
-                torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, self.best_path)
+                # Complete epoch task
+                progress.remove_task(epoch_task)
+                
+                # Validation with metrics
+                val_acc, val_metrics = self.evaluate(val_loader)
+                
+                # Log validation metrics
+                log_entry = {
+                    'phase': 'val', 
+                    'epoch': epoch, 
+                    'iter': 0, 
+                    'acc': val_acc,
+                    'timestamp': datetime.now().isoformat()
+                }
+                if val_metrics:
+                    log_entry['metrics'] = val_metrics
+                
+                # If using epoch frequency, also log the training metrics collected at the end of epoch
+                if self.cfg.get('metrics_frequency', 'iteration') == 'epoch' and epoch_metrics:
+                    log_entry['train_metrics'] = epoch_metrics[-1]
+                
+                self.logger.log(log_entry)
+                
+                if val_acc > best_val:
+                    best_val = val_acc
+                    torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, self.best_path)
+                
+                # Update main training progress
+                progress.update(training_task, advance=1, description=f"Training for {epochs} epochs - Val Acc: {val_acc:.4f}")
 
         torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, os.path.join(self.run_dir, 'last.pt'))
 

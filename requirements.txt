@@ -9,6 +9,9 @@ rich>=13.7
 tqdm>=4.66
 pytz>=2024.1
 
-# Metrics & plots (optional)
+# Metrics & plots
 scikit-learn>=1.4
 matplotlib>=3.8
+seaborn>=0.13
+pandas>=2.0
+scipy>=1.10

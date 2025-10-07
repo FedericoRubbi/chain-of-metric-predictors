@@ -42,7 +42,7 @@ def main():
         model = GreedyLinearNet(gcfg)
         model.load_state_dict(state['model'])
         trainer = GreedyTrainer(args.run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
-        acc_last, acc_layers = trainer.evaluate(bundle.test)
+        acc_last, acc_layers, test_metrics = trainer.evaluate(bundle.test)
         console.print(f"[bold cyan]TEST acc (last layer):[/bold cyan] {acc_last:.4f}")
         console.print(f"Per-layer acc: {acc_layers}")
         results = {'acc_last': acc_last, 'acc_layers': acc_layers}

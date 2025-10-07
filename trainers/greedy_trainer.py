@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple, Optional
 import os
+import sys
 import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast, GradScaler
@@ -10,7 +11,11 @@ from utils.anchors import build_or_load_anchors
 from utils.schedulers import WarmupCosine
 from utils.logger import JsonlLogger
 from utils.metrics_collector import MetricsCollector
+from utils.optimized_metrics_collector import OptimizedMetricsCollector
 from models.greedy_linear import GreedyLinearNet, GreedyConfig
+from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.console import Console
+from datetime import datetime
 
 
 class GreedyTrainer:
@@ -38,15 +43,18 @@ class GreedyTrainer:
         self.logger = JsonlLogger(run_dir)
         
         # Initialize metrics collector
-        self.metrics_collector = MetricsCollector(
+        enable_slow_metrics = self.cfg.get('enable_slow_metrics', False)
+        self.metrics_collector = OptimizedMetricsCollector(
             num_classes=num_classes,
             N=cfg['N'],
             similarity=cfg.get('similarity', 'cosine'),
             tau=cfg.get('tau', 1.0),
-            lambda_reg=cfg.get('lambda_reg', 1e-3)
+            lambda_reg=cfg.get('lambda_reg', 1e-3),
+            enable_slow_metrics=enable_slow_metrics
         )
         self.metrics_collector.set_anchors(self.anchors.E)
         self.metrics_collector.initialize_entropy_estimators(cfg['layers'])
+        self.console = Console()
 
     def _make_targets(self, y: torch.Tensor) -> torch.Tensor:
         # one-hot targets p
@@ -114,9 +122,20 @@ class GreedyTrainer:
 
         self.scaler.update()
 
-        # Collect metrics every few iterations to avoid overhead
+        # Collect metrics based on frequency setting
+        metrics_frequency = self.cfg.get('metrics_frequency', 'iteration')
+        should_collect_metrics = False
+        
+        if metrics_frequency == 'iteration':
+            # Collect metrics every few iterations to avoid overhead
+            should_collect_metrics = (global_step % self.cfg.get('metrics_log_frequency', 10) == 0)
+        elif metrics_frequency == 'epoch':
+            # For epoch frequency, we'll collect metrics at the end of each epoch
+            # This will be handled in the fit() method
+            should_collect_metrics = False
+        
         batch_metrics = None
-        if global_step % self.cfg.get('metrics_log_frequency', 10) == 0:  # Use configurable frequency
+        if should_collect_metrics:
             with torch.no_grad():
                 batch_metrics = self.metrics_collector.collect_gmlp_metrics(
                     embeddings_list, y, x
@@ -141,36 +160,107 @@ class GreedyTrainer:
         best_path = os.path.join(self.run_dir, 'best.pt')
 
         global_step = 0
-        for epoch in range(1, epochs + 1):
-            self.model.train()
-            for it, batch in enumerate(train_loader, start=1):
-                metrics = self._step_batch(batch, global_step)
-                # Step schedulers
-                for sch in self.scheds:
-                    sch.step()
-                global_step += 1
-                # Log (compact)
+        
+        with Progress(
+            TextColumn("[bold blue]Training"),
+            BarColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=self.console,
+        ) as progress:
+            # Create main training task
+            training_task = progress.add_task(
+                f"Training for {epochs} epochs", 
+                total=epochs
+            )
+            
+            for epoch in range(1, epochs + 1):
+                self.model.train()
+                epoch_metrics = None
+                
+                # Create epoch task
+                epoch_task = progress.add_task(
+                    f"Epoch {epoch}/{epochs}", 
+                    total=len(train_loader)
+                )
+                
+                for it, batch in enumerate(train_loader, start=1):
+                    metrics = self._step_batch(batch, global_step)
+                    # Step schedulers
+                    for sch in self.scheds:
+                        sch.step()
+                    global_step += 1
+                    
+                    # Log training step
+                    log_entry = {
+                        'phase': 'train', 
+                        'epoch': epoch, 
+                        'iter': it, 
+                        'step': global_step,
+                        'loss': metrics['loss'], 
+                        'acc': metrics['acc_last'],
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    if metrics['batch_metrics'] is not None:
+                        log_entry['metrics'] = metrics['batch_metrics']
+                    self.logger.log(log_entry)
+                    
+                    # Collect metrics at the end of epoch if using epoch frequency
+                    if self.cfg.get('metrics_frequency', 'iteration') == 'epoch' and it == len(train_loader):
+                        with torch.no_grad():
+                            # Re-run the last batch to collect metrics
+                            x, y = batch
+                            x = x.to(self.device)
+                            y = y.to(self.device)
+                            B = x.size(0)
+                            x = x.view(B, -1)
+                            
+                            # Get embeddings for metrics collection
+                            h_prev = x
+                            embeddings_list = []
+                            for i in range(1, self.cfg['layers'] + 1):
+                                h_i = self.model.forward_layer_from(h_prev, i)
+                                embeddings_list.append(h_i.detach())
+                                h_prev = h_i.detach()
+                            
+                            epoch_metrics = self.metrics_collector.collect_gmlp_metrics(
+                                embeddings_list, y, x
+                            )
+                    
+                    # Update progress
+                    progress.update(epoch_task, advance=1, description=f"Epoch {epoch}/{epochs} - Loss: {metrics['loss']:.4f}")
+                
+                # Complete epoch task
+                progress.remove_task(epoch_task)
+                
+                # Validation
+                val_acc_last, val_acc_layers, val_metrics = self.evaluate(val_loader)
+                
+                # Log validation metrics
                 log_entry = {
-                    'phase': 'train', 'epoch': epoch, 'iter': it, 'step': global_step,
-                    'loss': metrics['loss'], 'acc_last': metrics['acc_last']
+                    'phase': 'val', 
+                    'epoch': epoch, 
+                    'iter': 0, 
+                    'acc': val_acc_last,
+                    'timestamp': datetime.now().isoformat()
                 }
-                if metrics['batch_metrics'] is not None:
-                    log_entry['metrics'] = metrics['batch_metrics']
+                if val_metrics:
+                    log_entry['metrics'] = val_metrics
+                
+                # If using epoch frequency, also log the training metrics collected at the end of epoch
+                if self.cfg.get('metrics_frequency', 'iteration') == 'epoch' and epoch_metrics is not None:
+                    log_entry['train_metrics'] = epoch_metrics
+                
                 self.logger.log(log_entry)
 
-            # Validation
-            val_acc_last, val_acc_layers, val_metrics = self.evaluate(val_loader)
-            
-            # Log validation metrics
-            log_entry = {'phase': 'val', 'epoch': epoch, 'iter': 0, 'loss': None, 'acc_last': val_acc_last, 'acc_layers': val_acc_layers}
-            if val_metrics:
-                log_entry['metrics'] = val_metrics
-            self.logger.log(log_entry)
-
-            # Checkpoint best
-            if val_acc_last > best_val:
-                best_val = val_acc_last
-                torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, best_path)
+                # Checkpoint best
+                if val_acc_last > best_val:
+                    best_val = val_acc_last
+                    torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, best_path)
+                
+                # Update main training progress
+                progress.update(training_task, advance=1, description=f"Training for {epochs} epochs - Val Acc: {val_acc_last:.4f}")
 
         # Save final
         torch.save({'model': self.model.state_dict(), 'cfg': self.cfg}, os.path.join(self.run_dir, 'last.pt'))

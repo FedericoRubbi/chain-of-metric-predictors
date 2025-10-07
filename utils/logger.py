@@ -12,7 +12,5 @@ class JsonlLogger:
     def log(self, rec: Dict[str, Any]):
         with open(self.path, 'a') as f:
             f.write(json.dumps(rec) + '\n')
-        # pretty print some key fields
-        msg = {k: rec[k] for k in ['phase', 'epoch', 'iter', 'loss'] if k in rec}
-        if msg:
-            self.console.print(f"[dim]log[/dim] {msg}")
+        # Note: Removed console.print to prevent text spam during training
+        # Progress bar updates are handled by Rich Progress in the trainers

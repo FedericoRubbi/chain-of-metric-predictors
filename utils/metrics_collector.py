@@ -225,7 +225,7 @@ class MetricsCollector:
         
         # Extract metrics that can be summarized
         metrics_to_summarize = [
-            'accuracy', 'cross_entropy', 'alignment', 'margin', 
+            'accuracy', 'probe_accuracy', 'cross_entropy', 'alignment', 'margin', 
             'ace_regularizer', 'mutual_information', 'gaussian_entropy',
             'participation_ratio', 'linear_cka', 'ridge_r2'
         ]
@@ -246,8 +246,8 @@ class MetricsCollector:
         probe_accuracies = []
         probe_f1_scores = []
         for layer_key, layer_data in layer_metrics.items():
-            if 'accuracy' in layer_data and 'f1_score' in layer_data:
-                probe_accuracies.append(layer_data['accuracy'])
+            if 'probe_accuracy' in layer_data and 'f1_score' in layer_data:
+                probe_accuracies.append(layer_data['probe_accuracy'])
                 probe_f1_scores.append(layer_data['f1_score'])
         
         if probe_accuracies:

@@ -86,15 +86,13 @@ def run_training(config_path: str, run_dir: str):
             result = subprocess.run([
                 sys.executable, "scripts/train.py", 
                 "--config", config_path
-            ], capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            ], cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             
             if result.returncode != 0:
                 console.print(f"[bold red]Training failed![/bold red]")
-                console.print(f"Error: {result.stderr}")
                 return False
             
             progress.update(task, description="✅ Training completed successfully!")
-            console.print(f"[green]Training output:[/green] {result.stdout}")
             return True
             
         except Exception as e:
@@ -151,11 +149,11 @@ def run_visualization(run_dir: str, show_plots: bool = False, research_only: boo
         task1 = progress.add_task("Generating basic visualizations...", total=None)
         
         try:
-            cmd = [sys.executable, "scripts/plot_curves.py", "--run_dir", run_dir]
+            cmd = [sys.executable, "scripts/plot_metrics.py", "--run_dirs", run_dir]
             if show_plots:
                 cmd.append("--show")
             if research_only:
-                cmd.append("--research_only")
+                cmd.append("--comprehensive")
             
             result = subprocess.run(cmd, capture_output=True, text=True,
                                   cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -176,7 +174,7 @@ def run_visualization(run_dir: str, show_plots: bool = False, research_only: boo
         task2 = progress.add_task("Generating confusion matrix...", total=None)
         
         try:
-            cmd = [sys.executable, "scripts/show_confusion.py", "--run_dir", run_dir]
+            cmd = [sys.executable, "scripts/plot_metrics.py", "--run_dirs", run_dir, "--confusion", run_dir]
             if show_plots:
                 cmd.append("--show")
             

@@ -30,6 +30,9 @@ def cosine_alignment_metrics(embeddings: torch.Tensor, anchors: torch.Tensor, la
     Returns:
         Dict with 'alignment' and 'margin' metrics
     """
+    # Ensure both tensors have the same dtype to avoid RuntimeError
+    embeddings = embeddings.to(anchors.dtype)
+    
     # Normalize embeddings and anchors
     embeddings_norm = F.normalize(embeddings, p=2, dim=1)  # (B, N)
     anchors_norm = F.normalize(anchors, p=2, dim=1)  # (C, N)
@@ -169,7 +172,7 @@ def one_shot_linear_probe(embeddings: torch.Tensor, labels: torch.Tensor, lambda
     accuracy = accuracy_score(y, y_pred)
     f1 = f1_score(y, y_pred, average='weighted')
     
-    return {'accuracy': accuracy, 'f1_score': f1}
+    return {'probe_accuracy': accuracy, 'f1_score': f1}
 
 
 def participation_ratio(embeddings: torch.Tensor) -> float:
@@ -182,6 +185,9 @@ def participation_ratio(embeddings: torch.Tensor) -> float:
     Returns:
         Participation ratio
     """
+    # Convert to float32 for eigenvalue computation (linalg.eigvals doesn't support Half)
+    embeddings = embeddings.float()
+    
     # Center the data
     embeddings_centered = embeddings - embeddings.mean(dim=0, keepdim=True)
     
@@ -210,6 +216,9 @@ def linear_cka(embeddings1: torch.Tensor, embeddings2: torch.Tensor) -> float:
     Returns:
         Linear CKA similarity
     """
+    # Ensure both tensors have the same dtype
+    embeddings1 = embeddings1.to(embeddings2.dtype)
+    
     # Center the embeddings
     emb1_centered = embeddings1 - embeddings1.mean(dim=0, keepdim=True)
     emb2_centered = embeddings2 - embeddings2.mean(dim=0, keepdim=True)
