@@ -141,6 +141,7 @@ dmypy.json
 
 # Training logs and outputs
 runs/
+background_runs/
 logs/
 tensorboard_logs/
 wandb/
@@ -173,14 +174,14 @@ artifacts/
 *.eps
 
 # Results and reports
+plots/
 results/
 reports/
 outputs/
 test_results.json
 class_report.json
-confusion.npy
-confusion.png
 plot_*.png
+configs/
 
 # IDE and editor files
 .vscode/
