@@ -119,17 +119,21 @@ class BaselineTrainer:
                     
                     if should_collect_metrics:
                         with torch.no_grad():
-                            # Compute logits for each layer using anchors
-                            logits_list = []
-                            for embeddings in embeddings_list:
-                                layer_logits, _ = self.metrics_collector.compute_layer_logits_and_probs(embeddings)
-                                logits_list.append(layer_logits)
-                            
-                            # Collect metrics
-                            batch_metrics = self.metrics_collector.collect_mlp_metrics(
-                                embeddings_list, logits_list, y, x
-                            )
-                            epoch_metrics.append(batch_metrics)
+                            try:
+                                # Compute logits for each layer using anchors
+                                logits_list = []
+                                for embeddings in embeddings_list:
+                                    layer_logits, _ = self.metrics_collector.compute_layer_logits_and_probs(embeddings)
+                                    logits_list.append(layer_logits)
+                                
+                                # Collect metrics
+                                batch_metrics = self.metrics_collector.collect_mlp_metrics(
+                                    embeddings_list, logits_list, y, x
+                                )
+                                epoch_metrics.append(batch_metrics)
+                            except Exception:
+                                # Never interrupt training on metrics errors
+                                pass
                     
                     # Log training step
                     log_entry = {
@@ -154,8 +158,11 @@ class BaselineTrainer:
                 # Complete epoch task
                 progress.remove_task(epoch_task)
                 
-                # Validation with metrics
-                val_acc, val_metrics = self.evaluate(val_loader)
+                # Validation with metrics (never interrupt training)
+                try:
+                    val_acc, val_metrics = self.evaluate(val_loader)
+                except Exception:
+                    val_acc, val_metrics = 0.0, None
                 
                 # Log validation metrics
                 log_entry = {
@@ -203,16 +210,18 @@ class BaselineTrainer:
             correct += (preds == y).sum().item()
             total += B
             
-            # Collect metrics for this batch
-            logits_list = []
-            for embeddings in embeddings_list:
-                layer_logits, _ = self.metrics_collector.compute_layer_logits_and_probs(embeddings)
-                logits_list.append(layer_logits)
-            
-            batch_metrics = self.metrics_collector.collect_mlp_metrics(
-                embeddings_list, logits_list, y, x
-            )
-            all_metrics.append(batch_metrics)
+            # Collect metrics for this batch (guarded)
+            try:
+                logits_list = []
+                for embeddings in embeddings_list:
+                    layer_logits, _ = self.metrics_collector.compute_layer_logits_and_probs(embeddings)
+                    logits_list.append(layer_logits)
+                batch_metrics = self.metrics_collector.collect_mlp_metrics(
+                    embeddings_list, logits_list, y, x
+                )
+                all_metrics.append(batch_metrics)
+            except Exception:
+                pass
         
         accuracy = correct / total
         

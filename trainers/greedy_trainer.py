@@ -137,9 +137,12 @@ class GreedyTrainer:
         batch_metrics = None
         if should_collect_metrics:
             with torch.no_grad():
-                batch_metrics = self.metrics_collector.collect_gmlp_metrics(
-                    embeddings_list, y, x
-                )
+                try:
+                    batch_metrics = self.metrics_collector.collect_gmlp_metrics(
+                        embeddings_list, y, x
+                    )
+                except Exception:
+                    batch_metrics = None
 
         # Return last layer metrics + per-layer arrays + batch metrics
         return {
@@ -209,24 +212,27 @@ class GreedyTrainer:
                     # Collect metrics at the end of epoch if using epoch frequency
                     if self.cfg.get('metrics_frequency', 'iteration') == 'epoch' and it == len(train_loader):
                         with torch.no_grad():
-                            # Re-run the last batch to collect metrics
-                            x, y = batch
-                            x = x.to(self.device)
-                            y = y.to(self.device)
-                            B = x.size(0)
-                            x = x.view(B, -1)
-                            
-                            # Get embeddings for metrics collection
-                            h_prev = x
-                            embeddings_list = []
-                            for i in range(1, self.cfg['layers'] + 1):
-                                h_i = self.model.forward_layer_from(h_prev, i)
-                                embeddings_list.append(h_i.detach())
-                                h_prev = h_i.detach()
-                            
-                            epoch_metrics = self.metrics_collector.collect_gmlp_metrics(
-                                embeddings_list, y, x
-                            )
+                            try:
+                                # Re-run the last batch to collect metrics
+                                x, y = batch
+                                x = x.to(self.device)
+                                y = y.to(self.device)
+                                B = x.size(0)
+                                x = x.view(B, -1)
+                                
+                                # Get embeddings for metrics collection
+                                h_prev = x
+                                embeddings_list = []
+                                for i in range(1, self.cfg['layers'] + 1):
+                                    h_i = self.model.forward_layer_from(h_prev, i)
+                                    embeddings_list.append(h_i.detach())
+                                    h_prev = h_i.detach()
+                                
+                                epoch_metrics = self.metrics_collector.collect_gmlp_metrics(
+                                    embeddings_list, y, x
+                                )
+                            except Exception:
+                                epoch_metrics = None
                     
                     # Update progress
                     progress.update(epoch_task, advance=1, description=f"Epoch {epoch}/{epochs} - Loss: {metrics['loss']:.4f}")
@@ -234,8 +240,11 @@ class GreedyTrainer:
                 # Complete epoch task
                 progress.remove_task(epoch_task)
                 
-                # Validation
-                val_acc_last, val_acc_layers, val_metrics = self.evaluate(val_loader)
+                # Validation (guarded)
+                try:
+                    val_acc_last, val_acc_layers, val_metrics = self.evaluate(val_loader)
+                except Exception:
+                    val_acc_last, val_acc_layers, val_metrics = 0.0, [0.0 for _ in range(self.cfg['layers'])], None
                 
                 # Log validation metrics
                 log_entry = {
@@ -292,11 +301,14 @@ class GreedyTrainer:
             
             total += B
             
-            # Collect metrics for this batch
-            batch_metrics = self.metrics_collector.collect_gmlp_metrics(
-                embeddings_list, y, x
-            )
-            all_metrics.append(batch_metrics)
+            # Collect metrics for this batch (guarded)
+            try:
+                batch_metrics = self.metrics_collector.collect_gmlp_metrics(
+                    embeddings_list, y, x
+                )
+                all_metrics.append(batch_metrics)
+            except Exception:
+                pass
         
         acc_layers = [c / total for c in correct_layers]
         

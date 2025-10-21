@@ -95,20 +95,54 @@ def mutual_information_estimate(inputs: torch.Tensor, outputs: torch.Tensor, bin
     Returns:
         Estimated mutual information
     """
-    # Flatten for MI estimation
-    inputs_flat = inputs.view(inputs.size(0), -1)
-    outputs_flat = outputs.view(outputs.size(0), -1)
-    
-    # Use first principal component for MI estimation
-    pca_input = PCA(n_components=1).fit_transform(inputs_flat.cpu().numpy())
-    pca_output = PCA(n_components=1).fit_transform(outputs_flat.cpu().numpy())
-    
-    # Discretize for MI estimation
-    input_discrete = np.digitize(pca_input.flatten(), np.linspace(pca_input.min(), pca_input.max(), bins))
-    output_discrete = np.digitize(pca_output.flatten(), np.linspace(pca_output.min(), pca_output.max(), bins))
-    
-    mi = mutual_info_score(input_discrete, output_discrete)
-    return mi
+    # Robust MI estimation with sanitization and degenerate-case handling
+    try:
+        # Flatten and detach for MI estimation
+        inputs_flat = inputs.detach().view(inputs.size(0), -1).float()
+        outputs_flat = outputs.detach().view(outputs.size(0), -1).float()
+
+        X_in = inputs_flat.cpu().numpy()
+        X_out = outputs_flat.cpu().numpy()
+
+        # Replace NaN/Inf and clip extreme values to keep PCA stable
+        X_in = np.nan_to_num(X_in, nan=0.0, posinf=1e6, neginf=-1e6)
+        X_out = np.nan_to_num(X_out, nan=0.0, posinf=1e6, neginf=-1e6)
+
+        if not np.isfinite(X_in).all() or not np.isfinite(X_out).all():
+            return 0.0
+
+        # First principal component for MI estimation
+        pca_input = PCA(n_components=1).fit_transform(X_in)
+        pca_output = PCA(n_components=1).fit_transform(X_out)
+
+        a_min, a_max = float(np.min(pca_input)), float(np.max(pca_input))
+        b_min, b_max = float(np.min(pca_output)), float(np.max(pca_output))
+
+        # Guard degenerate ranges
+        if not np.isfinite([a_min, a_max, b_min, b_max]).all():
+            return 0.0
+        if a_min == a_max or b_min == b_max:
+            return 0.0
+
+        # Ensure at least 2 bins and strictly monotonic edges
+        bins = max(int(bins), 2)
+        input_edges = np.linspace(a_min, a_max, bins)
+        output_edges = np.linspace(b_min, b_max, bins)
+        input_edges = np.unique(input_edges)
+        output_edges = np.unique(output_edges)
+        if input_edges.shape[0] < 2 or output_edges.shape[0] < 2:
+            return 0.0
+
+        input_discrete = np.digitize(pca_input.ravel(), input_edges)
+        output_discrete = np.digitize(pca_output.ravel(), output_edges)
+
+        mi = mutual_info_score(input_discrete, output_discrete)
+        if not np.isfinite(mi):
+            return 0.0
+        return float(mi)
+    except Exception:
+        # Any numerical issue should not crash training; treat MI as 0
+        return 0.0
 
 
 class GaussianEntropyEstimator:
@@ -159,20 +193,34 @@ def one_shot_linear_probe(embeddings: torch.Tensor, labels: torch.Tensor, lambda
     Returns:
         Dict with 'accuracy' and 'f1_score' - classification performance metrics
     """
-    X = embeddings.cpu().numpy()
-    y = labels.cpu().numpy()
+    # Convert to float32 and sanitize to avoid NaN/Inf issues from mixed precision
+    X = embeddings.detach().float().cpu().numpy()
+    y = labels.detach().cpu().numpy()
     
-    # Ridge regression for CLASSIFICATION: embeddings → labels
-    clf = RidgeClassifier(alpha=lambda_reg)
-    clf.fit(X, y)
+    # Replace NaN/Inf and clip extremes
+    X = np.nan_to_num(X, nan=0.0, posinf=1e6, neginf=-1e6)
     
-    # Predictions
-    y_pred = clf.predict(X)
+    # Optional light standardization to stabilize solver
+    # Avoid zero-variance features by adding small epsilon
+    mean = X.mean(axis=0, keepdims=True)
+    std = X.std(axis=0, keepdims=True)
+    std = np.where(std < 1e-6, 1.0, std)
+    Xs = (X - mean) / std
     
-    accuracy = accuracy_score(y, y_pred)
-    f1 = f1_score(y, y_pred, average='weighted')
-    
-    return {'probe_accuracy': accuracy, 'f1_score': f1}
+    try:
+        # Ridge regression for CLASSIFICATION: embeddings → labels
+        clf = RidgeClassifier(alpha=lambda_reg)
+        clf.fit(Xs, y)
+        
+        # Predictions
+        y_pred = clf.predict(Xs)
+        
+        accuracy = accuracy_score(y, y_pred)
+        f1 = f1_score(y, y_pred, average='weighted')
+        return {'probe_accuracy': float(accuracy), 'f1_score': float(f1)}
+    except Exception:
+        # On any numerical error, return safe defaults
+        return {'probe_accuracy': 0.0, 'f1_score': 0.0}
 
 
 def participation_ratio(embeddings: torch.Tensor) -> float:
@@ -313,17 +361,26 @@ def compute_layer_metrics(
     if probs_current is not None and probs_next is not None:
         metrics['ace_regularizer'] = ace_regularizer(probs_current, probs_next)
     
-    # Mutual information (if inputs provided)
+    # Mutual information (if inputs provided) with guard against numerical issues
     if inputs is not None:
-        metrics['mutual_information'] = mutual_information_estimate(inputs, embeddings)
+        try:
+            mi_val = mutual_information_estimate(inputs, embeddings)
+            if np.isfinite(mi_val):
+                metrics['mutual_information'] = mi_val
+        except Exception:
+            # Skip MI if it fails; other metrics remain
+            pass
     
     # Gaussian entropy (if estimator provided)
     if entropy_estimator is not None:
         metrics['gaussian_entropy'] = entropy_estimator.update(embeddings)
     
-    # One-shot linear probe
-    probe_metrics = one_shot_linear_probe(embeddings, labels, lambda_reg)
-    metrics.update(probe_metrics)
+    # One-shot linear probe (guarded)
+    try:
+        probe_metrics = one_shot_linear_probe(embeddings, labels, lambda_reg)
+        metrics.update(probe_metrics)
+    except Exception:
+        pass
     
     # Participation ratio
     metrics['participation_ratio'] = participation_ratio(embeddings)

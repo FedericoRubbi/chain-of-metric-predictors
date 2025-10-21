@@ -201,7 +201,13 @@ class OptimizedMetricsCollector:
         
         # Mutual information (if inputs provided)
         if inputs is not None:
-            metrics['mutual_information'] = mutual_information_estimate(inputs, embeddings)
+            try:
+                mi_val = mutual_information_estimate(inputs, embeddings)
+                # Only set if finite; otherwise skip to avoid crashing aggregation
+                if np.isfinite(mi_val):
+                    metrics['mutual_information'] = float(mi_val)
+            except Exception:
+                pass
         
         # Fixed Gaussian entropy (if estimator provided)
         if entropy_estimator is not None:
