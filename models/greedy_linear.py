@@ -22,6 +22,7 @@ class GreedyLinearNet(nn.Module):
         self.cfg = cfg
         mods: List[nn.Module] = []
         in_dim = cfg.input_dim
+        # Build main Linear+ReLU stack
         for i in range(cfg.layers):
             mods.append(nn.Linear(in_dim, cfg.N, bias=True))
             mods.append(nn.ReLU(inplace=True))
@@ -31,6 +32,17 @@ class GreedyLinearNet(nn.Module):
         # For convenience, also keep references to each Linear and ReLU
         self.linears = nn.ModuleList([m for m in self.net if isinstance(m, nn.Linear)])
         self.relus = nn.ModuleList([m for m in self.net if isinstance(m, nn.ReLU)])
+
+        # Residual stream: send input of each layer to its output (projection if needed)
+        residuals: List[nn.Module] = []
+        in_dim = cfg.input_dim
+        for i in range(cfg.layers):
+            if in_dim == cfg.N:
+                residuals.append(nn.Identity())
+            else:
+                residuals.append(nn.Linear(in_dim, cfg.N, bias=False))
+            in_dim = cfg.N
+        self.residuals = nn.ModuleList(residuals)
 
         self.reset_parameters()
 
@@ -45,23 +57,18 @@ class GreedyLinearNet(nn.Module):
         """Convenience for eval without grad: returns list of embeddings per layer (after ReLU)."""
         hs: List[torch.Tensor] = []
         h = x
-        li = 0
-        for i in range(len(self.net)):
-            m = self.net[i]
-            h = m(h)
-            if isinstance(m, nn.ReLU):
-                hs.append(h)
-                li += 1
+        for i in range(1, self.cfg.layers + 1):
+            h = self.forward_layer_from(h, i)
+            hs.append(h)
         return hs
 
     def forward_all(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Forward returning [h1, h2, ..., hL] with grad enabled."""
         hs: List[torch.Tensor] = []
         h = x
-        for m in self.net:
-            h = m(h)
-            if isinstance(m, nn.ReLU):
-                hs.append(h)
+        for i in range(1, self.cfg.layers + 1):
+            h = self.forward_layer_from(h, i)
+            hs.append(h)
         return hs
 
     def forward_layer_from(self, h_prev: torch.Tensor, layer_index: int) -> torch.Tensor:
@@ -69,4 +76,5 @@ class GreedyLinearNet(nn.Module):
         # Each layer is (Linear_i, ReLU_i) pair in sequence
         lin = self.linears[layer_index - 1]
         relu = self.relus[layer_index - 1]
-        return relu(lin(h_prev))
+        res = self.residuals[layer_index - 1]
+        return relu(lin(h_prev) + res(h_prev))

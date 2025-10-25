@@ -35,8 +35,12 @@ class GreedyTrainer:
         # Per-layer optimizers & schedulers
         self.optims: List[torch.optim.Optimizer] = []
         self.scheds: List[WarmupCosine] = []
-        for lin in model.linears:
-            opt = torch.optim.Adam(lin.parameters(), lr=cfg['lr'], betas=(0.9, 0.999), weight_decay=cfg['weight_decay'])
+        for idx, lin in enumerate(model.linears):
+            # Include residual projection for the corresponding layer
+            params = list(lin.parameters())
+            if hasattr(model, 'residuals'):
+                params += list(model.residuals[idx].parameters())
+            opt = torch.optim.Adam(params, lr=cfg['lr'], betas=(0.9, 0.999), weight_decay=cfg['weight_decay'])
             self.optims.append(opt)
         total_steps = None  # set during fit with len(train_loader) * epochs
         self.scaler = GradScaler(enabled=True)
