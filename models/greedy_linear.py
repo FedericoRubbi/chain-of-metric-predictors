@@ -12,6 +12,10 @@ class GreedyConfig:
     similarity: str  # 'cosine' or 'l2'
     tau: float
     lambda_ace: float
+    # Normalization settings for per-layer inputs
+    normalize_inputs: bool = True
+    norm: str = 'l2'  # 'l2' or 'l1'
+    norm_eps: float = 1e-6
 
 
 class GreedyLinearNet(nn.Module):
@@ -51,6 +55,11 @@ class GreedyLinearNet(nn.Module):
             nn.init.kaiming_uniform_(lin.weight, a=5**0.5)
             if lin.bias is not None:
                 nn.init.zeros_(lin.bias)
+        # Initialize residual projection linears if present
+        if hasattr(self, 'residuals'):
+            for res in self.residuals:
+                if isinstance(res, nn.Linear):
+                    nn.init.kaiming_uniform_(res.weight, a=5**0.5)
 
     @torch.no_grad()
     def embeddings_no_grad(self, x: torch.Tensor) -> List[torch.Tensor]:
@@ -77,4 +86,13 @@ class GreedyLinearNet(nn.Module):
         lin = self.linears[layer_index - 1]
         relu = self.relus[layer_index - 1]
         res = self.residuals[layer_index - 1]
-        return relu(lin(h_prev) + res(h_prev))
+        # Normalize input if enabled
+        if self.cfg.normalize_inputs:
+            if self.cfg.norm == 'l1':
+                denom = h_prev.abs().sum(dim=-1, keepdim=True)
+            else:
+                denom = torch.norm(h_prev, p=2, dim=-1, keepdim=True)
+            h_in = h_prev / denom.clamp_min(self.cfg.norm_eps)
+        else:
+            h_in = h_prev
+        return relu(lin(h_in) + res(h_in))
