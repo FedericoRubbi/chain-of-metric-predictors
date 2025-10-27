@@ -55,7 +55,7 @@ def load_and_print_config(config_path: str):
     
     # Key parameters to display
     key_params = [
-        "dataset", "model", "N", "layers", "similarity", "tau", "lambda_ace", 
+        "dataset", "model", "N", "layers", "similarity", "tau", "lambda_ace", "ace_variant",
         "batch_size", "epochs", "lr", "weight_decay", "scheduler", "warmup_ratio", 
         "num_workers", "seed", "metrics_log_frequency"
     ]

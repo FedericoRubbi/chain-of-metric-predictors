@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
 from utils.scores import scores_from_embeddings, softmax_with_temperature
-from utils.metrics import cross_entropy_from_probs, top1_accuracy
+from utils.metrics import cross_entropy_from_probs, top1_accuracy, js_from_probs, symmetric_kl_from_probs
 from utils.anchors import build_or_load_anchors
 from utils.schedulers import WarmupCosine
 from utils.logger import JsonlLogger
@@ -105,7 +105,17 @@ class GreedyTrainer:
                     with torch.no_grad():
                         h_ip1 = self.model.forward_layer_from(h_i.detach(), i + 1)
                         _, q_ip1 = self._compute_layer_logits_and_probs(h_ip1)
-                    ace = cross_entropy_from_probs(q_i, q_ip1)  # H(q_i, q_{i+1})
+                    # Build regularizer variants
+                    regs = {
+                        'ce_i_next': cross_entropy_from_probs(q_i, q_ip1),
+                        'ce_next_i': cross_entropy_from_probs(q_ip1, q_i),
+                        'js': js_from_probs(q_i, q_ip1),
+                        'sym_kl': symmetric_kl_from_probs(q_i, q_ip1),
+                    }
+                    ace_variant = self.cfg.get('ace_variant', 'ce_i_next')
+                    if ace_variant not in regs:
+                        raise ValueError(f"Unknown ace_variant: {ace_variant}")
+                    ace = regs[ace_variant]
                     # Use per-layer ACE weight: layer i connecting to i+1 uses lambda_ace[i-1]
                     lambda_ace_i = self.cfg['lambda_ace'][i - 1]
                 else:

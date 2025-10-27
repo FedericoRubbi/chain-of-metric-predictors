@@ -24,6 +24,7 @@ from utils.advanced_metrics import (
     ridge_regression_r2
 )
 from utils.scores import scores_from_embeddings, softmax_with_temperature
+from utils.metrics import cross_entropy_from_probs, js_from_probs, symmetric_kl_from_probs
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -195,9 +196,15 @@ class OptimizedMetricsCollector:
             metrics['alignment'] = alignment_metrics['alignment']
             metrics['margin'] = alignment_metrics['margin']
         
-        # ACE regularizer (if probabilities available)
+        # ACE regularizer variants (if probabilities available)
         if probs_current is not None and probs_next is not None:
+            # Legacy alias for backward compatibility
             metrics['ace_regularizer'] = ace_regularizer(probs_current, probs_next)
+            # New detailed variants
+            metrics['ace_ce_i_next'] = cross_entropy_from_probs(probs_current, probs_next)
+            metrics['ace_ce_next_i'] = cross_entropy_from_probs(probs_next, probs_current)
+            metrics['ace_js'] = js_from_probs(probs_current, probs_next)
+            metrics['ace_sym_kl'] = symmetric_kl_from_probs(probs_current, probs_next)
         
         # Mutual information (if inputs provided)
         if inputs is not None:

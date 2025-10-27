@@ -19,7 +19,7 @@ console = Console()
 
 def print_config(params):
     table = Table(title="Training Configuration")
-    for k in ["dataset", "model", "N", "layers", "similarity", "tau", "lambda_ace", "batch_size", "epochs", "lr", "weight_decay", "scheduler", "warmup_ratio", "num_workers", "seed"]:
+    for k in ["dataset", "model", "N", "layers", "similarity", "tau", "lambda_ace", "ace_variant", "batch_size", "epochs", "lr", "weight_decay", "scheduler", "warmup_ratio", "num_workers", "seed"]:
         if k in params:
             if k == "lambda_ace" and isinstance(params[k], list):
                 table.add_row(k, f"[{', '.join(str(x) for x in params[k])}]")
@@ -48,6 +48,13 @@ def main():
             raise ValueError(
                 f"lambda_ace must have length {expected_len} for {cfg['layers']} layers. "
                 f"Got {len(cfg['lambda_ace'])} values: {cfg['lambda_ace']}"
+            )
+        # Validate ace_variant if provided
+        allowed_variants = {"ce_i_next", "ce_next_i", "js", "sym_kl"}
+        ace_variant = cfg.get('ace_variant', 'ce_i_next')
+        if ace_variant not in allowed_variants:
+            raise ValueError(
+                f"ace_variant must be one of {sorted(allowed_variants)}. Got: {ace_variant}"
             )
 
     set_seed(cfg.get('seed', 0))
