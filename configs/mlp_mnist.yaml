@@ -1,0 +1,15 @@
+dataset: mnist
+seed: 0
+model: mlp
+N: 1024
+layers: 4
+batch_size: 128
+epochs: 60
+lr: 0.03
+weight_decay: 0.0001
+scheduler: cosine
+warmup_ratio: 0.05
+num_workers: 4
+metrics_frequency: epoch  # "iteration" or "epoch"
+metrics_log_frequency: 1  # Log metrics every N iterations (only used when metrics_frequency is "iteration")
+enable_slow_metrics: false  # Enable slow metrics (participation_ratio, ridge_r2) - significantly slower

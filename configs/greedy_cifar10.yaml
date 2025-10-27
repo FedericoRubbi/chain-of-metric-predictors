@@ -1,0 +1,19 @@
+dataset: cifar10
+seed: 0
+model: greedy
+N: 4096
+layers: 4
+similarity: cosine   # or "l2"
+tau: 0.1
+lambda_ace: [0.001, 0.001, 0.001]
+ace_variant: ce_i_next
+batch_size: 256
+epochs: 200
+lr: 0.001
+weight_decay: 0.00001
+scheduler: cosine
+warmup_ratio: 0.05
+num_workers: 4
+metrics_frequency: epoch  # "iteration" or "epoch"
+metrics_log_frequency: 1  # Log metrics every N iterations (only used when metrics_frequency is "iteration")
+enable_slow_metrics: false  # Enable slow metrics (participation_ratio, ridge_r2) - significantly slower
