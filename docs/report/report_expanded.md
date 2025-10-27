@@ -168,7 +168,7 @@ Configuration files (YAML) define dataset, model, architecture, training, regula
 - **Model**: `model: mlp|greedy`
 - **Architecture**: `N` (width), `layers` (depth), `similarity: cosine|l2`
 - **Training**: `epochs`, `batch_size`, `lr`, `weight_decay`, `warmup_ratio`
-- **Greedy-only**: `tau` (temperature), `lambda_ace` (list of per-layer ACE weights)
+- **Greedy-only**: `tau` (temperature), `lambda_ace` (list of per-layer ACE weights), `ace_variant` (ce_i_next|ce_next_i|js|sym_kl)
 - **Metrics**: `metrics_frequency: iteration|epoch`, `metrics_log_frequency`, `enable_slow_metrics`
 - **Reproducibility**: `seed`
 
@@ -182,6 +182,7 @@ layers: 4
 similarity: cosine
 tau: 1.0
 lambda_ace: [1.0e-3, 1.0e-3, 1.0e-3]  # 3 values for 4 layers (connections: 1→2, 2→3, 3→4)
+ace_variant: ce_i_next  # ce_i_next | ce_next_i | js | sym_kl
 epochs: 20
 batch_size: 128
 lr: 1.0e-3

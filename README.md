@@ -145,7 +145,7 @@ Configuration files specify:
 - **Model**: greedy, mlp
 - **Architecture**: N (hidden size), layers, similarity type
 - **Training**: epochs, batch size, learning rate, scheduler
-- **Regularization**: tau (temperature), lambda_ace (list of per-layer ACE weights for greedy model)
+- **Regularization**: tau (temperature), lambda_ace (list of per-layer ACE weights for greedy model), ace_variant (ce_i_next|ce_next_i|js|sym_kl)
 - **Metrics**: metrics_log_frequency (default: 5)
 
 ### Example Configuration for Greedy Model
@@ -155,7 +155,19 @@ For a 4-layer greedy network, the configuration should include:
 ```yaml
 layers: 4
 lambda_ace: [0.1, 0.2, 0.3]  # 3 values for connections: 1→2, 2→3, 3→4
+ace_variant: ce_i_next  # ce_i_next | ce_next_i | js | sym_kl
 ```
+### ACE regularizer variants
+
+You can choose the variant of the inter-layer diversity regularizer with `ace_variant`:
+
+- `ce_i_next`: H(q_i, q_{i+1})
+- `ce_next_i`: H(q_{i+1}, q_i)
+- `js`: Jensen–Shannon divergence
+- `sym_kl`: symmetric KL (D_KL(q_i||q_{i+1}) + D_KL(q_{i+1}||q_i))
+
+All four variants are logged in `log.jsonl` for analysis as:
+`ace_ce_i_next`, `ace_ce_next_i`, `ace_js`, `ace_sym_kl` (and legacy `ace_regularizer` equals `ace_ce_i_next`).
 
 Note: `lambda_ace` must be a list with length `layers - 1`, where each value controls the ACE regularizer weight for the corresponding layer connection.
 
