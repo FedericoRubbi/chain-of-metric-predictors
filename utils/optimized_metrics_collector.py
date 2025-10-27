@@ -200,11 +200,11 @@ class OptimizedMetricsCollector:
         if probs_current is not None and probs_next is not None:
             # Legacy alias for backward compatibility
             metrics['ace_regularizer'] = ace_regularizer(probs_current, probs_next)
-            # New detailed variants
-            metrics['ace_ce_i_next'] = cross_entropy_from_probs(probs_current, probs_next)
-            metrics['ace_ce_next_i'] = cross_entropy_from_probs(probs_next, probs_current)
-            metrics['ace_js'] = js_from_probs(probs_current, probs_next)
-            metrics['ace_sym_kl'] = symmetric_kl_from_probs(probs_current, probs_next)
+            # New detailed variants (ensure JSON-serializable floats)
+            metrics['ace_ce_i_next'] = float(cross_entropy_from_probs(probs_current, probs_next).item())
+            metrics['ace_ce_next_i'] = float(cross_entropy_from_probs(probs_next, probs_current).item())
+            metrics['ace_js'] = float(js_from_probs(probs_current, probs_next).item())
+            metrics['ace_sym_kl'] = float(symmetric_kl_from_probs(probs_current, probs_next).item())
         
         # Mutual information (if inputs provided)
         if inputs is not None:
