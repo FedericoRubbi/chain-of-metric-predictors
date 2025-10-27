@@ -62,7 +62,10 @@ def load_and_print_config(config_path: str):
     
     for param in key_params:
         if param in cfg:
-            config_table.add_row(param, str(cfg[param]))
+            if param == "lambda_ace" and isinstance(cfg[param], list):
+                config_table.add_row(param, f"[{', '.join(str(x) for x in cfg[param])}]")
+            else:
+                config_table.add_row(param, str(cfg[param]))
     
     console.print(config_table)
     console.print()

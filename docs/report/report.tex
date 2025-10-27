@@ -54,9 +54,9 @@ Layerwise class probabilities are then obtained by applying a temperature-scaled
 \]
 Each layer is supervised with a local objective consisting of a classification term and an amended cross-entropy regularizer:
 \[
-  \mathcal{L}_i = H(p, q_i) - \lambda H(q_i, q_{i+1}),
+  \mathcal{L}_i = H(p, q_i) - \lambda_i H(q_i, q_{i+1}),
 \]
-where $p(c|x)=1$ is the density of the ground-truth class $c$ given the sample $x$, and $H(\cdot,\cdot)$ denotes cross-entropy. The second term encourages diversity between consecutive layers by penalizing overly similar distributions. For the last layer, the regularizer vanishes since $q_{L+1}$ is undefined.
+where $p(c|x)=1$ is the density of the ground-truth class $c$ given the sample $x$, and $H(\cdot,\cdot)$ denotes cross-entropy. The second term encourages diversity between consecutive layers by penalizing overly similar distributions. Each layer $i$ has its own ACE weight coefficient $\lambda_i$, allowing fine-grained control over the regularization strength at different depths. For the last layer, the regularizer vanishes since $q_{L+1}$ is undefined.
 
 Training follows a strictly greedy procedure. Each layer maintains its own optimizer (Adam in the experiments). During a training step, the batch is propagated to layer $i$, the local loss $\mathcal{L}_i$ is computed, and gradients are applied only to the parameters of that layer. Inputs from previous layers are detached, ensuring independence of updates. Each layer consumes the normalized input $\tilde{h}_{i-1}$ and updates both the main weights $W_i$ (and biases) and, when applicable, the residual projection $R_i$. This yields a \emph{layer-wise greedy optimization scheme} rather than full backpropagation.
 
@@ -65,13 +65,13 @@ From an architectural perspective, the vanilla MLP follows the conventional pipe
 
 Prediction mechanisms also differ: in the vanilla model, probabilities are obtained only at the final layer, whereas the greedy model produces a distribution $q_i$ at each layer, enabling analysis of per-layer performance.
 
-Training procedures diverge strongly. The vanilla MLP uses a single optimizer and backpropagation across all layers, while the greedy model uses per-layer optimizers with detached activations, performing localized updates. Loss formulations also reflect this contrast: the vanilla loss is a single global cross-entropy, whereas the greedy model employs a sequence of local losses augmented with ACE regularization:
+Training procedures diverge strongly. The vanilla MLP uses a single optimizer and backpropagation across all layers, while the greedy model uses per-layer optimizers with detached activations, performing localized updates. Loss formulations also reflect this contrast: the vanilla loss is a single global cross-entropy, whereas the greedy model employs a sequence of local losses augmented with per-layer ACE regularization:
 \[
   \mathcal{L}_{\text{MLP}} = H(p, q^{\text{MLP}}), \qquad
-  \mathcal{L}_i^{\text{Greedy}} = H(p, q_i) - \lambda H(q_i, q_{i+1}).
+  \mathcal{L}_i^{\text{Greedy}} = H(p, q_i) - \lambda_i H(q_i, q_{i+1}).
 \]
 
-Additional hyperparameters appear in the greedy formulation, notably the temperature $\tau$, the ACE weight $\lambda$, and the choice of similarity metric. These provide more flexibility but also introduce additional complexity in tuning.
+Additional hyperparameters appear in the greedy formulation, notably the temperature $\tau$, the per-layer ACE weights $\{\lambda_i\}_{i=1}^{L-1}$, and the choice of similarity metric. These provide more flexibility but also introduce additional complexity in tuning. The per-layer ACE weights allow different regularization strengths across the network depth, enabling more nuanced control over layer diversity.
 
 \section{Evaluation}
 Evaluation of the vanilla model focuses on final test accuracy. By contrast, the greedy model naturally yields per-layer accuracies $\{\mathrm{acc}_i\}_{i=1}^L$ in addition to the final-layer performance. This feature not only provides interpretability of intermediate representations but also allows the study of information flow and representation quality across depth.

@@ -21,7 +21,10 @@ def print_config(params):
     table = Table(title="Training Configuration")
     for k in ["dataset", "model", "N", "layers", "similarity", "tau", "lambda_ace", "batch_size", "epochs", "lr", "weight_decay", "scheduler", "warmup_ratio", "num_workers", "seed"]:
         if k in params:
-            table.add_row(k, str(params[k]))
+            if k == "lambda_ace" and isinstance(params[k], list):
+                table.add_row(k, f"[{', '.join(str(x) for x in params[k])}]")
+            else:
+                table.add_row(k, str(params[k]))
     console.print(table)
 
 
@@ -32,6 +35,20 @@ def main():
 
     with open(args.config, 'r') as f:
         cfg = yaml.safe_load(f)
+
+    # Validate lambda_ace for greedy model
+    if cfg['model'] == 'greedy':
+        if not isinstance(cfg.get('lambda_ace'), list):
+            raise ValueError(
+                f"lambda_ace must be a list for greedy model. "
+                f"Got {type(cfg.get('lambda_ace')).__name__}: {cfg.get('lambda_ace')}"
+            )
+        expected_len = cfg['layers'] - 1
+        if len(cfg['lambda_ace']) != expected_len:
+            raise ValueError(
+                f"lambda_ace must have length {expected_len} for {cfg['layers']} layers. "
+                f"Got {len(cfg['lambda_ace'])} values: {cfg['lambda_ace']}"
+            )
 
     set_seed(cfg.get('seed', 0))
 

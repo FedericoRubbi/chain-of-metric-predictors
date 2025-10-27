@@ -11,7 +11,7 @@ class GreedyConfig:
     layers: int
     similarity: str  # 'cosine' or 'l2'
     tau: float
-    lambda_ace: float
+    lambda_ace: List[float]  # Per-connection ACE weights (length must be layers - 1)
     # Normalization settings for per-layer inputs
     normalize_inputs: bool = True
     norm: str = 'l2'  # 'l2' or 'l1'
@@ -24,6 +24,14 @@ class GreedyLinearNet(nn.Module):
     def __init__(self, cfg: GreedyConfig):
         super().__init__()
         self.cfg = cfg
+        
+        # Validate lambda_ace length
+        if len(cfg.lambda_ace) != cfg.layers - 1:
+            raise ValueError(
+                f"lambda_ace must have length {cfg.layers - 1} for {cfg.layers} layers. "
+                f"Got {len(cfg.lambda_ace)} values: {cfg.lambda_ace}"
+            )
+        
         mods: List[nn.Module] = []
         in_dim = cfg.input_dim
         # Build main Linear+ReLU stack

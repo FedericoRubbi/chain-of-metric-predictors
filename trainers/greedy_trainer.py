@@ -106,11 +106,14 @@ class GreedyTrainer:
                         h_ip1 = self.model.forward_layer_from(h_i.detach(), i + 1)
                         _, q_ip1 = self._compute_layer_logits_and_probs(h_ip1)
                     ace = cross_entropy_from_probs(q_i, q_ip1)  # H(q_i, q_{i+1})
+                    # Use per-layer ACE weight: layer i connecting to i+1 uses lambda_ace[i-1]
+                    lambda_ace_i = self.cfg['lambda_ace'][i - 1]
                 else:
                     ace = torch.tensor(0.0, device=self.device)
+                    lambda_ace_i = 0.0
 
                 ce = cross_entropy_from_probs(p, q_i)  # H(p, q_i)
-                loss_i = ce - self.cfg['lambda_ace'] * ace
+                loss_i = ce - lambda_ace_i * ace
 
             # Optimize only layer i's Linear parameters
             self.optims[i - 1].zero_grad(set_to_none=True)
