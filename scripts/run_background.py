@@ -26,6 +26,7 @@ import time
 import signal
 from pathlib import Path
 from datetime import datetime
+import shlex
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -95,6 +96,54 @@ python3 {main_script} --config "$CONFIG_PATH" {' '.join(additional_args or [])} 
 echo "Background {script_name} completed successfully at $(date)" >> "$LOG_FILE"
 """
 
+    return script_content
+
+
+def create_background_script_generic(script_name: str, run_dir: str, cmd_args: list):
+    """Create a background execution script for an arbitrary entry command."""
+    cmd_str = " ".join(shlex.quote(x) for x in cmd_args)
+
+    script_content = f"""#!/bin/bash
+# Background {script_name} script
+# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+set -e  # Exit on any error
+
+# Configuration
+RUN_DIR="{run_dir}"
+SCRIPT_NAME="{script_name}"
+LOG_FILE="{run_dir}/background_run.log"
+PID_FILE="{run_dir}/background_run.pid"
+
+# Create run directory if it doesn't exist
+mkdir -p "$RUN_DIR"
+
+# Function to cleanup on exit
+cleanup() {{
+    echo "Cleaning up background {script_name}..."
+    rm -f "$PID_FILE"
+    echo "Background {script_name} completed at $(date)" >> "$LOG_FILE"
+}}
+
+# Set up signal handlers
+trap cleanup EXIT INT TERM
+
+# Log start
+echo "Starting background {script_name} at $(date)" > "$LOG_FILE"
+echo "Run directory: $RUN_DIR" >> "$LOG_FILE"
+echo "Process ID: $$" >> "$LOG_FILE"
+echo "PID: $$" > "$PID_FILE"
+
+# Change to project directory
+cd "{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}"
+
+# Run the entry command
+echo "Executing: python3 {cmd_str}" >> "$LOG_FILE"
+python3 {cmd_str} >> "$LOG_FILE" 2>&1
+
+# Log completion
+echo "Background {script_name} completed successfully at $(date)" >> "$LOG_FILE"
+"""
     return script_content
 
 
@@ -185,6 +234,80 @@ def run_background_training(config_path: str, simulation: bool = False,
         
         return True
         
+    except Exception as e:
+        console.print(f"[bold red]Error starting background process:[/bold red] {e}")
+        return False
+
+
+def run_background_experiment(exp_path: str, additional_args: list = None, simulation: bool = False, run_dir: str = None):
+    """Run experiment orchestrator in the background."""
+    if not os.path.exists(exp_path):
+        console.print(f"[bold red]Error: Experiment spec '{exp_path}' not found![/bold red]")
+        return False
+
+    if run_dir is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        script_type = "simulation_experiment" if simulation else "experiment"
+        run_dir = f"background_runs/{script_type}_{timestamp}"
+
+    os.makedirs(run_dir, exist_ok=True)
+
+    # Build command args for run_experiment.py
+    cmd_args = [
+        "scripts/run_experiment.py", "--exp", exp_path
+    ] + (additional_args or [])
+
+    script_content = create_background_script_generic(
+        "simulation_experiment" if simulation else "experiment",
+        run_dir,
+        cmd_args,
+    )
+
+    script_path = os.path.join(run_dir, "background_script.sh")
+    with open(script_path, 'w') as f:
+        f.write(script_content)
+    os.chmod(script_path, 0o755)
+
+    log_file = os.path.join(run_dir, "nohup.log")
+    pid_file = os.path.join(run_dir, "background_run.pid")
+
+    console.print(Panel(f"🚀 [bold green]Starting Background {'Simulation ' if simulation else ''}Experiment[/bold green]", style="green"))
+
+    try:
+        process = subprocess.Popen(
+            f"nohup bash {script_path} > {log_file} 2>&1 < /dev/null &",
+            shell=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+
+        time.sleep(2)
+
+        actual_pid = None
+        if os.path.exists(pid_file):
+            with open(pid_file, 'r') as f:
+                actual_pid = f.read().strip()
+
+        info_table = Table(title="Background Process Information", show_header=True, header_style="bold green")
+        info_table.add_column("Property", style="cyan")
+        info_table.add_column("Value", style="green")
+        info_table.add_row("Script Type", "Simulation Experiment" if simulation else "Experiment")
+        info_table.add_row("Spec File", exp_path)
+        info_table.add_row("Run Directory", run_dir)
+        info_table.add_row("Process ID", actual_pid or "Unknown")
+        info_table.add_row("Log File", log_file)
+        info_table.add_row("PID File", pid_file)
+        info_table.add_row("Background Script", script_path)
+        console.print(info_table)
+
+        console.print(Panel("📋 [bold blue]Monitoring Commands[/bold blue]", style="blue"))
+        console.print(f"• Monitor progress: [cyan]tail -f {log_file}[/cyan]")
+        console.print(f"• Check if running: [cyan]ps -p {actual_pid or 'PID'}[/cyan]")
+        console.print(f"• Stop process: [cyan]kill {actual_pid or 'PID'}[/cyan]")
+        console.print(f"• Check PID file: [cyan]cat {pid_file}[/cyan]")
+
+        console.print(Panel("✅ [bold green]Background process started successfully![/bold green]", style="green"))
+        console.print("You can now safely disconnect from SSH. The process will continue running.")
+        return True
     except Exception as e:
         console.print(f"[bold red]Error starting background process:[/bold red] {e}")
         return False
@@ -294,6 +417,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run training or simulation in background')
     parser.add_argument('--config', type=str, default=None,
                        help='Path to YAML configuration file')
+    parser.add_argument('--experiment', type=str, default=None,
+                       help='Path to experiment YAML specification')
     parser.add_argument('--simulation', action='store_true',
                        help='Run simulation instead of just training')
     parser.add_argument('--run_dir', type=str, default=None,
@@ -306,6 +431,13 @@ def main():
                        help='Skip confusion matrix generation (for simulation)')
     parser.add_argument('--advanced', action='store_true',
                        help='Run advanced multi-run analysis (for simulation)')
+    # Experiment flags
+    parser.add_argument('--resume', action='store_true',
+                       help='Resume experiment and skip completed runs')
+    parser.add_argument('--limit', type=int, default=None,
+                       help='Limit number of runs for the experiment')
+    parser.add_argument('--exp_name', type=str, default=None,
+                       help='Override experiment name')
     parser.add_argument('--list', action='store_true',
                        help='List all background processes')
     parser.add_argument('--stop', type=str, default=None,
@@ -326,11 +458,38 @@ def main():
             console.print(f"[red]Failed to stop process in {args.stop}[/red]")
         return 0
     
-    # Validate config file is provided for training/simulation
+    # If experiment specified, run experiment orchestrator
+    if args.experiment:
+        exp_additional = []
+        # Forward experiment flags
+        if args.resume:
+            exp_additional.append("--resume")
+        if args.limit is not None:
+            exp_additional += ["--limit", str(args.limit)]
+        if args.exp_name:
+            exp_additional += ["--name", args.exp_name]
+        # Forward simulation-related flags to run_experiment (only used if mode=simulation in spec)
+        if args.show:
+            exp_additional.append("--show")
+        if args.research_only:
+            exp_additional.append("--research_only")
+        if args.no_confusion:
+            exp_additional.append("--no_confusion")
+        if args.advanced:
+            exp_additional.append("--advanced")
+
+        if run_background_experiment(args.experiment, exp_additional, simulation=args.simulation, run_dir=args.run_dir):
+            console.print(Panel("🎉 [bold green]Background process started successfully![/bold green]", style="green"))
+            return 0
+        else:
+            console.print(Panel("❌ [bold red]Failed to start background process![/bold red]", style="red"))
+            return 1
+
+    # Otherwise require a config for training/simulation
     if not args.config:
-        console.print("[bold red]Error: --config is required for training/simulation![/bold red]")
+        console.print("[bold red]Error: --config or --experiment is required![/bold red]")
         return 1
-    
+
     # Prepare additional arguments for simulation
     additional_args = []
     if args.simulation:
@@ -342,8 +501,7 @@ def main():
             additional_args.append("--no_confusion")
         if args.advanced:
             additional_args.append("--advanced")
-    
-    # Run background training/simulation
+
     if run_background_training(args.config, args.simulation, additional_args, args.run_dir):
         console.print(Panel("🎉 [bold green]Background process started successfully![/bold green]", style="green"))
         return 0
