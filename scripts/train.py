@@ -13,6 +13,10 @@ from models.greedy_linear import GreedyLinearNet, GreedyConfig
 from trainers.greedy_trainer import GreedyTrainer
 from models.mlp_baseline import MlpBaseline, MlpConfig
 from trainers.baseline_trainer import BaselineTrainer
+from models.mono_forward import MonoForwardNet, MonoForwardConfig
+from trainers.mono_forward_trainer import MonoForwardTrainer
+from models.forward_forward import ForwardForwardNet, ForwardForwardConfig
+from trainers.forward_forward_trainer import ForwardForwardTrainer
 
 console = Console()
 
@@ -96,6 +100,31 @@ def main():
         )
         model = MlpBaseline(mcfg)
         trainer = BaselineTrainer(run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
+        trainer.fit(bundle.train, bundle.val, epochs=cfg['epochs'])
+        test_acc, test_metrics = trainer.evaluate(bundle.test)
+        console.print(f"[bold cyan]Test Acc:[/bold cyan] {test_acc:.4f}")
+    elif cfg['model'] == 'mono_forward':
+        mcfg = MonoForwardConfig(
+            input_dim=bundle.input_dim,
+            N=cfg['N'],
+            layers=cfg['layers'],
+            num_classes=bundle.num_classes,
+        )
+        model = MonoForwardNet(mcfg)
+        trainer = MonoForwardTrainer(run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
+        trainer.fit(bundle.train, bundle.val, epochs=cfg['epochs'])
+        test_acc_last, test_acc_layers, test_metrics = trainer.evaluate(bundle.test)
+        console.print(f"[bold cyan]Test Acc (last layer):[/bold cyan] {test_acc_last:.4f}")
+        console.print(f"Per-layer test acc: {test_acc_layers}")
+    elif cfg['model'] == 'forward_forward':
+        fcfg = ForwardForwardConfig(
+            input_dim=bundle.input_dim,
+            N=cfg['N'],
+            layers=cfg['layers'],
+            num_classes=bundle.num_classes,
+        )
+        model = ForwardForwardNet(fcfg)
+        trainer = ForwardForwardTrainer(run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
         trainer.fit(bundle.train, bundle.val, epochs=cfg['epochs'])
         test_acc, test_metrics = trainer.evaluate(bundle.test)
         console.print(f"[bold cyan]Test Acc:[/bold cyan] {test_acc:.4f}")

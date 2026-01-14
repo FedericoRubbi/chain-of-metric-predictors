@@ -13,6 +13,10 @@ from data.datasets import get_dataloaders
 from models.greedy_linear import GreedyLinearNet, GreedyConfig
 from trainers.greedy_trainer import GreedyTrainer
 from models.mlp_baseline import MlpBaseline, MlpConfig
+from models.mono_forward import MonoForwardNet, MonoForwardConfig
+from trainers.mono_forward_trainer import MonoForwardTrainer
+from models.forward_forward import ForwardForwardNet, ForwardForwardConfig
+from trainers.forward_forward_trainer import ForwardForwardTrainer
 
 console = Console()
 
@@ -111,6 +115,25 @@ def main():
             with open(os.path.join(args.run_dir, 'class_report.json'), 'w') as f:
                 json.dump(rep, f, indent=2)
             console.print("Saved confusion.npy and class_report.json")
+
+    elif cfg['model'] == 'mono_forward':
+        mcfg = MonoForwardConfig(input_dim=bundle.input_dim, N=cfg['N'], layers=cfg['layers'], num_classes=bundle.num_classes)
+        model = MonoForwardNet(mcfg)
+        model.load_state_dict(state['model'])
+        trainer = MonoForwardTrainer(args.run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
+        acc_last, acc_layers, test_metrics = trainer.evaluate(bundle.test)
+        console.print(f"[bold cyan]TEST acc (last layer):[/bold cyan] {acc_last:.4f}")
+        console.print(f"Per-layer acc: {acc_layers}")
+        results = {'acc_last': acc_last, 'acc_layers': acc_layers}
+
+    elif cfg['model'] == 'forward_forward':
+        fcfg = ForwardForwardConfig(input_dim=bundle.input_dim, N=cfg['N'], layers=cfg['layers'], num_classes=bundle.num_classes)
+        model = ForwardForwardNet(fcfg)
+        model.load_state_dict(state['model'])
+        trainer = ForwardForwardTrainer(args.run_dir, model, cfg, bundle.num_classes, cfg['dataset'])
+        acc, test_metrics = trainer.evaluate(bundle.test)
+        console.print(f"[bold cyan]TEST acc:[/bold cyan] {acc:.4f}")
+        results = {'acc': acc}
 
     with open(os.path.join(args.run_dir, 'test_results.json'), 'w') as f:
         json.dump(results, f, indent=2)
