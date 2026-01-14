@@ -42,6 +42,19 @@ def _cifar_transforms():
     return train_tf, test_tf
 
 
+def _fashion_mnist_transforms():
+    mean, std = (0.2860,), (0.3530,)
+    train_tf = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+    test_tf = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+    return train_tf, test_tf
+
+
 def get_dataloaders(dataset: str, batch_size: int, num_workers: int = 4, seed: int = 0, val_size: int = 5000) -> DataBundle:
     g = torch.Generator().manual_seed(seed)
 
@@ -49,6 +62,17 @@ def get_dataloaders(dataset: str, batch_size: int, num_workers: int = 4, seed: i
         train_tf, test_tf = _mnist_transforms()
         train_full = datasets.MNIST(root='data', train=True, download=True, transform=train_tf)
         test = datasets.MNIST(root='data', train=False, download=True, transform=test_tf)
+        # val split
+        val_size = min(val_size, len(train_full))
+        train_size = len(train_full) - val_size
+        train, val = random_split(train_full, [train_size, val_size], generator=g)
+        num_classes = 10
+        input_dim = 1 * 28 * 28
+
+    elif dataset.lower() in ['fmnist', 'fashion-mnist', 'fashionmnist']:
+        train_tf, test_tf = _fashion_mnist_transforms()
+        train_full = datasets.FashionMNIST(root='data', train=True, download=True, transform=train_tf)
+        test = datasets.FashionMNIST(root='data', train=False, download=True, transform=test_tf)
         # val split
         val_size = min(val_size, len(train_full))
         train_size = len(train_full) - val_size
