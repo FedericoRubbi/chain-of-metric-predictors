@@ -13,15 +13,18 @@ from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, Ti
 from rich.console import Console
 from datetime import datetime
 
-class DummyOptimizer:
+class DummyOptimizer(torch.optim.Optimizer):
     """A dummy optimizer to allow using PyTorch schedulers with manual update rules."""
     def __init__(self, lr: float):
-        self.param_groups = [{'lr': lr}]
+        # Pass a dummy parameter so that self.param_groups is populated with one group
+        # This allows the scheduler to find 'lr' and update it.
+        super().__init__([torch.nn.Parameter(torch.empty(0))], {'lr': lr})
+        self.state = {} # Initialize state to prevent errors if accessed
     
     def zero_grad(self, set_to_none=False):
         pass
         
-    def step(self):
+    def step(self, closure=None):
         pass
 
 class ForwardForwardTrainer:
