@@ -1,0 +1,15 @@
+dataset: fashion-mnist
+seed: 0
+model: mono_forward
+N: 1024
+layers: 4
+batch_size: 128
+epochs: 60
+lr: 0.001
+weight_decay: 0.0001
+scheduler: cosine
+warmup_ratio: 0.05
+num_workers: 4
+metrics_frequency: epoch
+metrics_log_frequency: 1
+enable_slow_metrics: false

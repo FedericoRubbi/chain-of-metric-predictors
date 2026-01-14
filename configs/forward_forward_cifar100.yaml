@@ -1,0 +1,16 @@
+dataset: cifar100
+seed: 0
+model: forward_forward
+N: 4096
+layers: 4
+theta: 2.0
+batch_size: 256
+epochs: 300
+lr: 0.001
+weight_decay: 0.00005
+scheduler: cosine
+warmup_ratio: 0.001
+num_workers: 4
+metrics_frequency: epoch
+metrics_log_frequency: 1
+enable_slow_metrics: false
