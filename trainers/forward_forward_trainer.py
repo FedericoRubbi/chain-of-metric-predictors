@@ -96,7 +96,8 @@ class ForwardForwardTrainer:
                             x, y, 
                             layer_idx=layer_idx, 
                             lr=current_lr,
-                            gamma=0.0 # Standard FF (can be modified for collaborative energy interaction)
+                            gamma=0.0, # Standard FF (can be modified for collaborative energy interaction)
+                            weight_decay=self.cfg.get('weight_decay', 0.0)
                         )
                     
                     self.scheduler.step()

@@ -51,7 +51,7 @@ class FFBlock(nn.Module):
         x = self.activation(x)
         return goodness(x, theta=self.theta, gamma=gamma)
     
-    def train_step(self, x, labels, lr=0.01, gamma=0.0):
+    def train_step(self, x, labels, lr=0.01, gamma=0.0, weight_decay=0.0):
         # Update weights based on Goodness gradient
         # labels: +1 for positive data, -1 for negative data
         
@@ -95,7 +95,7 @@ class FFBlock(nn.Module):
         # Update weights (gradient ascent on goodness)
         # Note: Code snippet used: self.W.weight.data += lr * dW
         with torch.no_grad():
-            self.W.weight.data += lr * dW
+            self.W.weight.data += lr * (dW - weight_decay * self.W.weight.data)
 
 
 @dataclass
@@ -146,7 +146,7 @@ class ForwardForwardNet(nn.Module):
                 x = layer(x)
             return x
 
-    def train_step_layer(self, x: torch.Tensor, y: torch.Tensor, layer_idx: int, lr: float = 0.01, gamma: torch.Tensor = 0.0):
+    def train_step_layer(self, x: torch.Tensor, y: torch.Tensor, layer_idx: int, lr: float = 0.01, gamma: torch.Tensor = 0.0, weight_decay: float = 0.0):
         """
         Executes a training step for a specific layer.
         Generates negative samples by masking labels.
@@ -185,7 +185,7 @@ class ForwardForwardNet(nn.Module):
                 x_in = self.layers[i](x_in)
         
         # Train step on current layer
-        self.layers[layer_idx].train_step(x_in, pos_neg_lab, lr=lr, gamma=gamma)
+        self.layers[layer_idx].train_step(x_in, pos_neg_lab, lr=lr, gamma=gamma, weight_decay=weight_decay)
 
     @torch.no_grad()
     def predict(self, x: torch.Tensor) -> torch.Tensor:
