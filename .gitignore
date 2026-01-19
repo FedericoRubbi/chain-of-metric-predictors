@@ -182,6 +182,7 @@ test_results.json
 class_report.json
 plot_*.png
 configs/
+experiments/*/*.json
 
 # IDE and editor files
 .vscode/
