@@ -1,0 +1,8 @@
+name: fig4_forward_forward_mnist
+mode: training
+base_config: configs/forward_forward_mnist.yaml
+fixed_overrides:
+  N: 1024
+  layers: 4
+sweep:
+  seed: [0, 1]

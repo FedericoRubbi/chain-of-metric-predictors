@@ -55,47 +55,53 @@ class FFBlock(nn.Module):
         # Update weights based on Goodness gradient
         # labels: +1 for positive data, -1 for negative data
         
-        # Use torch.func to get gradients of goodness w.r.t weights
-        # vmap over batch dimension (dim 0 of x and gamma)
-        # self.W.weight is constant across batch (in_dims=None)
+        # Standard backpropagation implementation to avoid OOM
+        # Compute forward pass locally
+        self.W.zero_grad()
         
-        # Handle gamma shape: if it's (B,), vmap expects it.
-        # If it's scalar 0, we might need to expand it or handle it.
-        # Ideally gamma should be aligned with x.
-        
-        goodness_grad_fn = jacrev(self.forward_goodness)
-        
-        # dW calculation using vmap
-        # gradients = vmap(goodness_grad_fn, (None, 0, 0))(self.W.weight, x, gamma) 
-        # But wait, gamma needs to be (B,) if mapped.
-        # If gamma is scalar 0.0, we need to handle that.
-        
-        if isinstance(gamma, (int, float)) and gamma == 0:
-            # Create a tensor of zeros if gamma is scalar 0
-            gamma_tensor = torch.zeros(x.shape[0], device=x.device)
-        elif isinstance(gamma, torch.Tensor) and gamma.ndim == 0:
-            gamma_tensor = gamma.expand(x.shape[0])
-        else:
-            gamma_tensor = gamma
+        # 1. Compute activations
+        z = self.W(x)
+        activations = self.activation(z) # (Batch, N)
 
-        dW = vmap(goodness_grad_fn, in_dims=(None, 0, 0))(
-            self.W.weight, x, gamma_tensor
-        )
-        
-        # maximize goodness for positive labels, min for negative (by multiplying by label)
-        # labels is (B,) or (B,1). dW is (B, Out, In).
-        if labels.ndim == 1:
-            labels = labels.view(-1, 1, 1)
+        # 2. Compute Goodness
+        # Handle gamma broadcasting
+        if isinstance(gamma, (int, float)):
+             gamma_val = gamma
+        elif isinstance(gamma, torch.Tensor) and gamma.ndim == 0:
+             gamma_val = gamma
         else:
-             labels = labels.view(labels.shape[0], 1, 1)
-             
-        # Mean gradient across batch
-        dW = torch.mean(dW * labels, dim=0)
+             gamma_val = gamma # Assume shape matches batch if tensor
+
+        # Energy per sample: sum(a^2) + gamma - theta
+        energy = torch.sum(activations ** 2, dim=1) + gamma_val - self.theta
+        inverse_goodness = 1 + torch.exp(-energy)
+        goodness_val = 1 / inverse_goodness # (Batch,)
+
+        # 3. Compute Loss
+        # We want to maximize: mean(goodness * label)
+        # Equivalent to minimizing: -mean(goodness * label)
         
-        # Update weights (gradient ascent on goodness)
-        # Note: Code snippet used: self.W.weight.data += lr * dW
+        # Ensure labels are 1D for element-wise mul
+        if labels.ndim > 1:
+            labels = labels.squeeze()
+            
+        loss = -torch.mean(goodness_val * labels)
+        
+        # 4. Backward
+        loss.backward()
+
+        # 5. Manual Update (Gradient Ascent on Goodness)
         with torch.no_grad():
-            self.W.weight.data += lr * (dW - weight_decay * self.W.weight.data)
+            if self.W.weight.grad is not None:
+                # dW (gradient of objective) = -grad (gradient of loss)
+                dW = -self.W.weight.grad
+                self.W.weight.data += lr * (dW - weight_decay * self.W.weight.data)
+            
+            # Note: Original implementation with jacrev did not update bias because 
+            # jacrev was only w.r.t input 0 (weight). We keep that behavior or update if desired.
+            # Usually bias=False in FFBlock configuration anyway.
+            
+            self.W.zero_grad()
 
 
 @dataclass

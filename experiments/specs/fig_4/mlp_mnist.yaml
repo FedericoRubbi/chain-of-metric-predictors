@@ -1,0 +1,8 @@
+name: fig4_mlp_mnist
+mode: training
+base_config: configs/mlp_mnist.yaml
+fixed_overrides:
+  N: 1024
+  layers: 4
+sweep:
+  seed: [0, 1]

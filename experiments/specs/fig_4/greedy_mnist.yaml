@@ -1,0 +1,9 @@
+name: fig4_greedy_mnist
+mode: training
+base_config: configs/greedy_mnist.yaml
+fixed_overrides:
+  N: 1024
+  layers: 4
+sweep:
+  tau: [0.1, 0.5]
+  seed: [0, 1]

@@ -5,8 +5,8 @@ N: 4096
 layers: 4
 similarity: cosine   # or "l2"
 tau: 0.1
-lambda_ace: [0.001, 0.001, 0.001]
-ace_variant: ce_i_next
+lambda_ace: [0.1, 0.1, 0.1]
+ace_variant: sym_kl
 batch_size: 256
 epochs: 200
 lr: 0.001

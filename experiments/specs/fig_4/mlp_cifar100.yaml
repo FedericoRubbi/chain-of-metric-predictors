@@ -1,0 +1,8 @@
+name: fig4_mlp_cifar100
+mode: training
+base_config: configs/mlp_cifar100.yaml
+fixed_overrides:
+  N: 4096
+  layers: 4
+sweep:
+  seed: [0, 1]
